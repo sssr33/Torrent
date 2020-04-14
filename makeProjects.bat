@@ -9,8 +9,8 @@ cd lua
 cl /MD /O2 /c /DLUA_BUILD_AS_DLL *.c
 ren lua.obj lua.o
 ren luac.obj luac.o
-link /DLL /IMPLIB:lua5.3.5.lib /OUT:lua5.3.5.dll *.obj
-link /OUT:lua.exe lua.o lua5.3.5.lib
+link /DLL /IMPLIB:lua.lib /OUT:lua.dll *.obj
+link /OUT:lua.exe lua.o lua.lib
 del /S *.obj
 del /S *.o
 cd ..
