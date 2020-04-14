@@ -4,3 +4,12 @@
 [submodule "boost"]
 	path = boost
 	url = https://github.com/boostorg/boost.git
+[submodule "zlib"]
+	path = zlib
+	url = https://github.com/madler/zlib.git
+[submodule "openssl"]
+	path = openssl
+	url = https://github.com/openssl/openssl.git
+[submodule "libtorrent"]
+	path = libtorrent
+	url = https://github.com/arvidn/libtorrent.git
