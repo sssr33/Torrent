@@ -1,0 +1,2 @@
+// the configured options and settings for BuildApp
+#define PROJECT_FOLDER "@CMAKE_CURRENT_SOURCE_DIR@"
