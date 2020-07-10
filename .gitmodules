@@ -1,7 +1,3 @@
-[submodule "lua"]
-	path = lua
-	url = https://github.com/lua/lua.git
-	ignore = untracked
 [submodule "boost"]
 	path = boost
 	url = https://github.com/boostorg/boost.git
