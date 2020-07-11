@@ -10,6 +10,9 @@ namespace Process
     public:
         Pipe();
 
+        HANDLE GetReadHandle() const;
+        HANDLE GetWriteHandle() const;
+
     private:
         std::unique_ptr<Helpers::HandleVal, Helpers::HandleCloseDeleter> readPipe;
         std::unique_ptr<Helpers::HandleVal, Helpers::HandleCloseDeleter> writePipe;

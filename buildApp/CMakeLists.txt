@@ -29,3 +29,7 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${MyCppSources})
 # https://cmake.org/cmake/help/latest/prop_dir/VS_STARTUP_PROJECT.html
 # https://stackoverflow.com/questions/7304625/how-do-i-change-the-startup-project-of-a-visual-studio-solution-via-cmake
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT BuildApp)
+
+if(MSVC)
+ target_compile_options(BuildApp PRIVATE "/MP")
+endif()
