@@ -2,5 +2,8 @@
 
 namespace Process
 {
-
+    Pipe::Pipe()
+    {
+        //CreatePipe()
+    }
 }
