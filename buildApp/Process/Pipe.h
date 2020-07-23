@@ -1,5 +1,5 @@
 #pragma once
-#include "Helpers/WinApiDeleters.h"
+#include "Helpers/WinApiSmartHandle.h"
 
 #include <memory>
 
@@ -14,7 +14,7 @@ namespace Process
         HANDLE GetWriteHandle() const;
 
     private:
-        std::unique_ptr<Helpers::HandleVal, Helpers::HandleCloseDeleter> readPipe;
-        std::unique_ptr<Helpers::HandleVal, Helpers::HandleCloseDeleter> writePipe;
+        Helpers::UniqueCloseHandle readPipe;
+        Helpers::UniqueCloseHandle writePipe;
     };
 }

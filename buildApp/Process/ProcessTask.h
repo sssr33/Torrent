@@ -7,9 +7,11 @@ namespace Process
     class ProcessTask
     {
     public:
-        ProcessTask(std::string exeName);
+        explicit ProcessTask(std::wstring exeName);
+
+        void Run();
 
     private:
-        std::string exeName;
+        std::wstring exeName;
     };
 }
