@@ -13,11 +13,16 @@ namespace Process
 		ProcessInformation() = default;
 		explicit ProcessInformation(PROCESS_INFORMATION&& procInfo);
 
+		HANDLE GetProcessHandle() const;
+		HANDLE GetThreadHandle() const;
+		DWORD GetProcessId() const;
+		DWORD GetThreadId() const;
+
 	private:
 		Helpers::UniqueCloseHandle processHandle;
 		Helpers::UniqueCloseHandle threadHandle;
-		DWORD dwProcessId = 0;
-		DWORD dwThreadId = 0;
+		DWORD processId = 0;
+		DWORD threadId = 0;
 	};
 }
 

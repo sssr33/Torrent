@@ -12,7 +12,7 @@ namespace Helpers
 
         static bool IsSrcEmpty(const Val* src)
         {
-            return src != nullptr;
+            return src == nullptr;
         }
 
         static Val* GetEmptySrc()

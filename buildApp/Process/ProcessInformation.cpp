@@ -5,10 +5,30 @@ namespace Process
 	ProcessInformation::ProcessInformation(PROCESS_INFORMATION&& procInfo)
 		: processHandle(procInfo.hProcess)
 		, threadHandle(procInfo.hThread)
-		, dwProcessId(procInfo.dwProcessId)
-		, dwThreadId(procInfo.dwThreadId)
+		, processId(procInfo.dwProcessId)
+		, threadId(procInfo.dwThreadId)
 	{
 		procInfo = {};
+	}
+
+	HANDLE ProcessInformation::GetProcessHandle() const
+	{
+		return this->processHandle.get();
+	}
+
+	HANDLE ProcessInformation::GetThreadHandle() const
+	{
+		return this->threadHandle.get();
+	}
+
+	DWORD ProcessInformation::GetProcessId() const
+	{
+		return this->processId;
+	}
+
+	DWORD ProcessInformation::GetThreadId() const
+	{
+		return this->threadId;
 	}
 }
 
