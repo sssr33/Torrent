@@ -1,16 +1,21 @@
 #include "Pipe.h"
+#include "MyCreatePipeEx.h"
 #include "Helpers/GetAddressOf.h"
 #include "Helpers/WinApiException.h"
 
 namespace Process
 {
-    Pipe::Pipe()
+    Pipe::Pipe(Arg::Async async)
     {
-        if (!CreatePipe(
+        DWORD flag = async ? FILE_FLAG_OVERLAPPED : 0;
+
+        if (!MyCreatePipeEx()(
             Helpers::GetAddressOf(this->readPipe),
             Helpers::GetAddressOf(this->writePipe),
             nullptr,
-            0))
+            0,
+            flag,
+            flag))
         {
             throw Helpers::WinApiException();
         }
