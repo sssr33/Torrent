@@ -7,7 +7,7 @@
 
 namespace Arg
 {
-    using BytesRead = Helpers::Strong<DWORD, struct BytesReadParameter>;
+    using BytesRead = Helpers::Strong<size_t, struct BytesReadParameter>;
 }
 
 namespace Process

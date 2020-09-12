@@ -2,6 +2,7 @@
 #include "ProcessInformation.h"
 #include "Pipe.h"
 #include "AsyncPipeReader.h"
+#include "PipeStdIn.h"
 #include "ProcessJobScope.h"
 #include "ProcessHelpers.h"
 #include "Helpers/WinApiException.h"
@@ -12,7 +13,7 @@
 
 namespace Process
 {
-	void ProcessTask::Run(const ProcessTaskParameters& params)
+	void ProcessTask::Run(const ProcessTaskParameters& params, IProcessTaskHandler& handler)
 	{
 		STARTUPINFOW startupInfo = {};
 		ProcessInformation procInfo;
@@ -29,15 +30,6 @@ namespace Process
 		inputPipe.SetReadHandleInheritable(true);
 		outputPipe.SetWriteHandleInheritable(true);
 		errorPipe.SetWriteHandleInheritable(true);
-
-		bool ir = inputPipe.IsReadHandleInheritable();
-		bool iw = inputPipe.IsWriteHandleInheritable();
-
-		bool or = outputPipe.IsReadHandleInheritable();
-		bool ow = outputPipe.IsWriteHandleInheritable();
-
-		bool er = errorPipe.IsReadHandleInheritable();
-		bool ew = errorPipe.IsWriteHandleInheritable();
 
 		AsyncPipeReader outputReader(outputPipe, 4096);
 		AsyncPipeReader errorReader(errorPipe, 4096);
@@ -91,6 +83,8 @@ namespace Process
 			procInfo.GetProcessHandle()
 		};
 
+		PipeStdIn pipeStdIn(inputPipe);
+
 		while (true)
 		{
 			const DWORD EventsCount = static_cast<DWORD>(std::size(events));
@@ -104,22 +98,18 @@ namespace Process
 					Arg::BytesRead bytesRead = outputReader.EndRead();
 					const void* buffer = outputReader.GetBuffer();
 
-					// process data
+					handler.OnOutput(buffer, bytesRead, pipeStdIn);
 
 					outputReader.BeginRead();
-
-					int stop = 234;
 				}
 				else if (events[evtIdx] == errorReader.GetReadEvent())
 				{
 					Arg::BytesRead bytesRead = errorReader.EndRead();
 					const void* buffer = errorReader.GetBuffer();
 
-					// process data
+					handler.OnError(buffer, bytesRead, pipeStdIn);
 
 					errorReader.BeginRead();
-
-					int stop = 234;
 				}
 				else if (events[evtIdx] == procInfo.GetProcessHandle())
 				{

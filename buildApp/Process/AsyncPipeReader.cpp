@@ -44,7 +44,7 @@ namespace Process
             throw Helpers::WinApiException();
         }
 
-        return Arg::BytesRead(bytesRead);
+        return Arg::BytesRead(static_cast<size_t>(bytesRead));
     }
 
     OVERLAPPED AsyncPipeReader::MakeOverlapped() const
