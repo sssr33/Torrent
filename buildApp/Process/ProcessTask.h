@@ -1,17 +1,14 @@
 #pragma once
+#include "ProcessTaskParameters.h"
 
 #include <string>
+#include <memory>
 
 namespace Process
 {
     class ProcessTask
     {
     public:
-        explicit ProcessTask(std::wstring exeName);
-
-        void Run();
-
-    private:
-        std::wstring exeName;
+        static void Run(const ProcessTaskParameters& params);
     };
 }

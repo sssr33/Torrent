@@ -1,6 +1,9 @@
 #include "ProcessTask.h"
 #include "ProcessInformation.h"
 #include "Pipe.h"
+#include "AsyncPipeReader.h"
+#include "ProcessJobScope.h"
+#include "ProcessHelpers.h"
 #include "Helpers/WinApiException.h"
 #include "Helpers/WinApiEvent.h"
 
@@ -9,19 +12,12 @@
 
 namespace Process
 {
-	ProcessTask::ProcessTask(std::wstring exeName)
-		: exeName(std::move(exeName))
-	{}
-
-	void ProcessTask::Run()
+	void ProcessTask::Run(const ProcessTaskParameters& params)
 	{
-		wchar_t* cmdLine = nullptr;
-
 		STARTUPINFOW startupInfo = {};
 		ProcessInformation procInfo;
 
-		std::wstring cmd = L"ping google.com";
-		std::vector<wchar_t> cmdVec(cmd.begin(), cmd.end());
+		std::vector<wchar_t> cmdVec(params.commandLine.begin(), params.commandLine.end());
 		cmdVec.push_back(0);
 
 		startupInfo.cb = sizeof startupInfo;
@@ -29,9 +25,6 @@ namespace Process
 		Pipe inputPipe(Arg::Async(true));
 		Pipe outputPipe(Arg::Async(true));
 		Pipe errorPipe(Arg::Async(true));
-
-		Helpers::WinApiEvent outputReadEvent(Arg::ManualReset(true), Arg::InitialSet(false));
-		Helpers::WinApiEvent errorReadEvent(Arg::ManualReset(true), Arg::InitialSet(false));
 
 		inputPipe.SetReadHandleInheritable(true);
 		outputPipe.SetWriteHandleInheritable(true);
@@ -46,6 +39,9 @@ namespace Process
 		bool er = errorPipe.IsReadHandleInheritable();
 		bool ew = errorPipe.IsWriteHandleInheritable();
 
+		AsyncPipeReader outputReader(outputPipe, 4096);
+		AsyncPipeReader errorReader(errorPipe, 4096);
+
 		// process reads pipe to get input
 		startupInfo.hStdInput = inputPipe.GetReadHandle();
 		// process writes pipe to give output
@@ -54,13 +50,19 @@ namespace Process
 		startupInfo.hStdError = errorPipe.GetWriteHandle();
 		startupInfo.dwFlags |= STARTF_USESTDHANDLES;
 
+		ProcessJobScope procScope;
+
+		DWORD procFlags = 0; //CREATE_NO_WINDOW
+		// https://stackoverflow.com/questions/89588/assignprocesstojobobject-fails-with-access-denied-error-when-running-under-the
+		procFlags |= ProcessHelpers::IsThisProcessInJob() ? CREATE_BREAKAWAY_FROM_JOB : 0;
+
 		if (!CreateProcessW(
-			nullptr,//this->exeName.c_str(),
-			cmdVec.data(),// cmdLine,
+			params.exePath.empty() ? nullptr : params.exePath.data(),
+			cmdVec.data(),
 			nullptr,
 			nullptr,
 			TRUE, // handles are inherited
-			0,//CREATE_NO_WINDOW,
+			procFlags,//CREATE_NO_WINDOW,
 			nullptr,
 			nullptr,
 			&startupInfo,
@@ -69,106 +71,59 @@ namespace Process
 			throw Helpers::WinApiException();
 		}
 
-		OVERLAPPED outputOverlapped = {};
-		OVERLAPPED errorOverlapped = {};
-
-		outputOverlapped.hEvent = outputReadEvent.GetEventHandle();
-		errorOverlapped.hEvent = errorReadEvent.GetEventHandle();
-
-		std::vector<char> outputReadBuf;
-		std::vector<char> errorReadBuf;
-
-		outputReadBuf.resize(4096);
-		errorReadBuf.resize(4096);
-
-		if (!ReadFile(outputPipe.GetReadHandle(), outputReadBuf.data(), static_cast<DWORD>(outputReadBuf.size()), nullptr, &outputOverlapped))
+		try
 		{
-			DWORD err = GetLastError();
-
-			if (err != ERROR_IO_PENDING)
-			{
-				throw Helpers::WinApiException();
-			}
+			procScope.AddProcessToJob(procInfo.GetProcessHandle());
+		}
+		catch (const Helpers::WinApiException& /*ex*/)
+		{
+			// maybe it's not critical
+			// but it's reccomended to add process to the job to finish it with this process
 		}
 
-		if (!ReadFile(errorPipe.GetReadHandle(), errorReadBuf.data(), static_cast<DWORD>(errorReadBuf.size()), nullptr, &errorOverlapped))
-		{
-			DWORD err = GetLastError();
-
-			if (err != ERROR_IO_PENDING)
-			{
-				throw Helpers::WinApiException();
-			}
-		}
+		outputReader.BeginRead();
+		errorReader.BeginRead();
 
 		HANDLE events[] =
 		{
-			errorReadEvent.GetEventHandle(),
-			outputReadEvent.GetEventHandle(),
+			outputReader.GetReadEvent(),
+			errorReader.GetReadEvent(),
 			procInfo.GetProcessHandle()
 		};
 
-		const DWORD eventsCount = static_cast<DWORD>(std::size(events));
-
 		while (true)
 		{
-			DWORD status = WaitForMultipleObjects(eventsCount, events, FALSE, INFINITE);
+			const DWORD EventsCount = static_cast<DWORD>(std::size(events));
+			DWORD status = WaitForMultipleObjects(EventsCount, events, FALSE, INFINITE);
 			DWORD evtIdx = status - WAIT_OBJECT_0;
 
-			if (evtIdx < eventsCount)
+			if (evtIdx < EventsCount)
 			{
-				if (events[evtIdx] == inputPipe.GetReadHandle())
+				if (events[evtIdx] == outputReader.GetReadEvent())
 				{
-					int stop = 234; // input ?
-				}
-				else if (events[evtIdx] == outputReadEvent.GetEventHandle())
-				{
-					DWORD bytesRead = 0;
-					if (!GetOverlappedResult(outputPipe.GetReadHandle(), &outputOverlapped, &bytesRead, TRUE))
-					{
-						throw Helpers::WinApiException();
-					}
+					Arg::BytesRead bytesRead = outputReader.EndRead();
+					const void* buffer = outputReader.GetBuffer();
 
-					outputOverlapped = {};
-					outputOverlapped.hEvent = outputReadEvent.GetEventHandle();
+					// process data
 
-					if (!ReadFile(outputPipe.GetReadHandle(), outputReadBuf.data(), static_cast<DWORD>(outputReadBuf.size()), nullptr, &outputOverlapped))
-					{
-						DWORD err = GetLastError();
-
-						if (err != ERROR_IO_PENDING)
-						{
-							throw Helpers::WinApiException();
-						}
-					}
+					outputReader.BeginRead();
 
 					int stop = 234;
 				}
-				else if (events[evtIdx] == errorReadEvent.GetEventHandle())
+				else if (events[evtIdx] == errorReader.GetReadEvent())
 				{
-					DWORD bytesRead = 0;
-					if (!GetOverlappedResult(errorPipe.GetReadHandle(), &errorOverlapped, &bytesRead, TRUE))
-					{
-						throw Helpers::WinApiException();
-					}
+					Arg::BytesRead bytesRead = errorReader.EndRead();
+					const void* buffer = errorReader.GetBuffer();
 
-					errorOverlapped = {};
-					errorOverlapped.hEvent = errorReadEvent.GetEventHandle();
+					// process data
 
-					if (!ReadFile(errorPipe.GetReadHandle(), errorReadBuf.data(), static_cast<DWORD>(errorReadBuf.size()), nullptr, &errorOverlapped))
-					{
-						DWORD err = GetLastError();
-
-						if (err != ERROR_IO_PENDING)
-						{
-							throw Helpers::WinApiException();
-						}
-					}
+					errorReader.BeginRead();
 
 					int stop = 234;
 				}
 				else if (events[evtIdx] == procInfo.GetProcessHandle())
 				{
+					// process exit
 					break;
 				}
 				else
@@ -190,92 +145,6 @@ namespace Process
 			}
 		}
 
-
-		/*HANDLE events2[] =
-		{
-			errorReadEvent.GetEventHandle(),
-			outputReadEvent.GetEventHandle(),
-		};
-
-		const DWORD eventsCount2 = static_cast<DWORD>(std::size(events2));
-
-		while (true)
-		{
-			DWORD status = WaitForMultipleObjects(eventsCount2, events2, FALSE, 0);
-			DWORD evtIdx = status - WAIT_OBJECT_0;
-
-			if (status == WAIT_TIMEOUT)
-			{
-				break;
-			}
-
-			if (evtIdx < eventsCount2)
-			{
-				if (events2[evtIdx] == outputReadEvent.GetEventHandle())
-				{
-					DWORD bytesRead = 0;
-					if (!GetOverlappedResult(outputPipe.GetReadHandle(), &outputOverlapped, &bytesRead, TRUE))
-					{
-						throw Helpers::WinApiException();
-					}
-
-					outputOverlapped = {};
-					outputOverlapped.hEvent = outputReadEvent.GetEventHandle();
-
-					if (!ReadFile(outputPipe.GetReadHandle(), outputReadBuf.data(), outputReadBuf.size(), nullptr, &outputOverlapped))
-					{
-						DWORD err = GetLastError();
-
-						if (err != ERROR_IO_PENDING)
-						{
-							throw Helpers::WinApiException();
-						}
-					}
-
-					int stop = 234;
-				}
-				else if (events2[evtIdx] == errorReadEvent.GetEventHandle())
-				{
-					DWORD bytesRead = 0;
-					if (!GetOverlappedResult(errorPipe.GetReadHandle(), &errorOverlapped, &bytesRead, TRUE))
-					{
-						throw Helpers::WinApiException();
-					}
-
-					errorOverlapped = {};
-					errorOverlapped.hEvent = errorReadEvent.GetEventHandle();
-
-					if (!ReadFile(errorPipe.GetReadHandle(), errorReadBuf.data(), errorReadBuf.size(), nullptr, &errorOverlapped))
-					{
-						DWORD err = GetLastError();
-
-						if (err != ERROR_IO_PENDING)
-						{
-							throw Helpers::WinApiException();
-						}
-					}
-
-					int stop = 234;
-				}
-				else
-				{
-					throw std::exception("Unknown event");
-				}
-			}
-			else
-			{
-				switch (status)
-				{
-				case WAIT_FAILED:
-					throw Helpers::WinApiException();
-				case WAIT_TIMEOUT:
-					throw std::exception("Timeout");
-				default:
-					throw std::exception("Unknown status");
-				}
-			}
-		}*/
-
-		// read out all errors and output
+		// TODO check if read out all errors and output needed ???
 	}
 }

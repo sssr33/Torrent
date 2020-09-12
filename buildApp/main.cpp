@@ -5,10 +5,11 @@
 
 int main()
 {
-	// ping google.com
-	Process::ProcessTask task(L"ping.exe");
+	Process::ProcessTaskParameters procParams;
 
-	task.Run();
+	procParams.commandLine = L"ping google.com";
+
+	Process::ProcessTask::Run(procParams);
 
 	return 0;
 }
