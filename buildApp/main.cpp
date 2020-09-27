@@ -1,5 +1,6 @@
 ﻿#include "BuildAppConfig.h"
 #include "Process/ProcessTask.h"
+#include "Helpers/Utf.h"
 
 #include <iostream>
 #include <vector>
@@ -26,23 +27,61 @@ public:
 	}
 };
 
+struct Result
+{
+	std::string outStr;
+	std::wstring woutStr;
+	std::u32string u32outStr;
+};
+
+Result RunTest(std::wstring encoding);
+
 int main()
+{
+	Helpers::Utf::Test();
+
+	//Process::ProcessTaskParameters procParams;
+
+	////procParams.commandLine = L"ping google.com";
+
+	//procParams.exePath = LR"(C:\Users\sssr3\source\repos\ConsoleApp1Sharp\ConsoleApp1Sharp\bin\Release\netcoreapp3.1\ConsoleApp1Sharp.exe)";
+	//procParams.commandLine = L"ConsoleApp1Sharp.exe ascii";
+
+	//TestProcessHandler handler;
+
+	//Process::ProcessTask::Run(procParams, handler);
+
+	//std::string outStr(handler.outputSink.begin(), handler.outputSink.end());
+	//std::wstring woutStr(reinterpret_cast<const wchar_t*>(handler.outputSink.data()), reinterpret_cast<const wchar_t*>(handler.outputSink.data() + handler.outputSink.size()));
+
+	auto ascii = RunTest(L"ascii");
+	auto u7 = RunTest(L"u7");
+	auto u8 = RunTest(L"u8");
+	auto u16 = RunTest(L"u16");
+
+	return 0;
+}
+
+Result RunTest(std::wstring encoding)
 {
 	Process::ProcessTaskParameters procParams;
 
 	//procParams.commandLine = L"ping google.com";
 
 	procParams.exePath = LR"(C:\Users\sssr3\source\repos\ConsoleApp1Sharp\ConsoleApp1Sharp\bin\Release\netcoreapp3.1\ConsoleApp1Sharp.exe)";
-	procParams.commandLine = L"ConsoleApp1Sharp.exe u16";
+	procParams.commandLine = L"ConsoleApp1Sharp.exe " + encoding;
 
 	TestProcessHandler handler;
 
 	Process::ProcessTask::Run(procParams, handler);
 
-	std::string outStr(handler.outputSink.begin(), handler.outputSink.end());
-	std::wstring woutStr(reinterpret_cast<const wchar_t*>(handler.outputSink.data()), reinterpret_cast<const wchar_t*>(handler.outputSink.data() + handler.outputSink.size()));
+	Result res;
 
-	return 0;
+	res.outStr = std::string(handler.outputSink.begin(), handler.outputSink.end());
+	res.woutStr = std::wstring(reinterpret_cast<const wchar_t*>(handler.outputSink.data()), reinterpret_cast<const wchar_t*>(handler.outputSink.data() + handler.outputSink.size()));
+	res.u32outStr = Helpers::Utf::Cvt<std::u32string>(res.outStr);
+
+	return res;
 }
 
 // https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
