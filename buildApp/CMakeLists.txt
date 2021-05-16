@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 # to the source code
 configure_file(BuildAppConfig.h.in BuildAppConfig.h)
 
-file(GLOB_RECURSE MyCppSources "./*.cpp" "./*.cxx" "./*.c" "./*.h" "./*.hpp")
+file(GLOB_RECURSE MyCppSources "./*.cpp" "./*.cxx" "./*.c" "./*.h" "./*.hpp" "gsl/*")
 
 # https://stackoverflow.com/a/36667361
 # disable ZERO_CHECK
