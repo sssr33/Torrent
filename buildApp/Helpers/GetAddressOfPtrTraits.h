@@ -45,7 +45,7 @@ namespace Helpers
     template<class Val>
     struct GetAddressOfTraits<Val*> : public GetAddressOfPtrTraitsBase<Val>
     {
-        static void Reset(Val*& dst, SrcT src)
+        static void Reset(Val*& dst, typename GetAddressOfPtrTraitsBase<Val>::SrcT src)
         {
             dst = src;
         }

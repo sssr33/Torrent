@@ -1,0 +1,34 @@
+perl Configure VC-WIN32 "--openssldir=D:\WorkChaikovsky\testProjects\Torrent\libs\openssl-1.1.1f\build_ints\dir" "--prefix=D:\WorkChaikovsky\testProjects\Torrent\libs\openssl-1.1.1f\build_ints\prefix" "--with-zlib-include=D:\WorkChaikovsky\testProjects\Torrent\libs\zlib-1.2.11\" "--with-zlib-lib=D:\WorkChaikovsky\testProjects\Torrent\libs\zlib-1.2.11\contrib\vstudio\vc14\x86\ZlibDllRelease\zlibwapi.lib" zlib-dynamic
+
+
+perl Configure VC-WIN32 --openssldir=D:\WorkChaikovsky\testProjects\Torrent\libs\openssl-1.1.1f\build_ints\dir --prefix=D:\WorkChaikovsky\testProjects\Torrent\libs\openssl-1.1.1f\build_ints\prefix --with-zlib-include=D:\WorkChaikovsky\testProjects\Torrent\libs\zlib-1.2.11 LDLIBS="D:\WorkChaikovsky\testProjects\Torrent\libs\zlib-1.2.11\contrib\vstudio\vc14\x86\ZlibDllRelease\zlibwapi.lib" --with-zlib-lib=zlibwapi.lib zlib
+
+
+ZLIB_WINAPI
+https://stackoverflow.com/questions/5424549/unresolved-externals-despite-linking-in-zlib-lib
+
+perl Configure VC-WIN32 --openssldir=D:\WorkChaikovsky\testProjects\Torrent\libs\openssl-1.1.1f\build_inst\dir --prefix=D:\WorkChaikovsky\testProjects\Torrent\libs\openssl-1.1.1f\build_inst\prefix --with-zlib-include=D:\WorkChaikovsky\testProjects\Torrent\libs\zlib-1.2.11 --with-zlib-lib=D:\WorkChaikovsky\testProjects\Torrent\libs\zlib-1.2.11\contrib\vstudio\vc14\x86\ZlibDllRelease\zlib.lib zlib
+
+perl Configure VC-WIN64A --openssldir=D:\WorkChaikovsky\testProjects\Torrent\libs\openssl-1.1.1f\build_ints\dir --prefix=D:\WorkChaikovsky\testProjects\Torrent\libs\openssl-1.1.1f\build_ints\prefix --with-zlib-include=D:\WorkChaikovsky\testProjects\Torrent\libs\zlib-1.2.11 --with-zlib-lib=D:\WorkChaikovsky\testProjects\Torrent\libs\zlib-1.2.11\contrib\vstudio\vc14\x64\ZlibDllRelease\zlib.lib zlib
+
+.\b2 --address-model=32 --prefix=D:\WorkChaikovsky\testProjects\Torrent\libs\boost_1_72_0\boost_install32 -sZLIB_INCLUDE=D:\WorkChaikovsky\testProjects\Torrent\libs\zlib-1.2.11 -sZLIB_LIBPATH=D:\WorkChaikovsky\testProjects\Torrent\libs\zlib-1.2.11\contrib\vstudio\vc14\x86\ZlibDllRelease
+
+.\b2 link=shared
+
+.\b2 link=shared threading=multi runtime-link=shared
+
+.\b2 link=static threading=multi runtime-link=shared
+
+.\b2 install --prefix=D:\WorkChaikovsky\testProjects\Torrent\libs\boost_1_72_0\boost_install32
+
+.\b2 link=static threading=multi runtime-link=shared --prefix=D:\WorkChaikovsky\testProjects\Torrent\libs\boost_1_72_0\boost_install32 install
+
+b2 link=shared threading=multi runtime-link=shared stage
+
+https://stackoverflow.com/questions/33566782/building-all-of-boost-in-a-few-minutes
+
+https://stackoverflow.com/questions/38798671/using-modular-boost-from-github
+
+https://stackoverflow.com/questions/14119498/building-a-solution-file-using-msbuild
+
+https://chrisjean.com/git-submodules-adding-using-removing-and-updating/

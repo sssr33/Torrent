@@ -17,6 +17,7 @@ namespace Helpers
 		WinApiEvent(Arg::ManualReset manualReset, Arg::InitialSet initialSet);
 
 		HANDLE GetEventHandle() const;
+		void ResetEvent() const;
 
 	private:
 		UniqueCloseHandle evt;

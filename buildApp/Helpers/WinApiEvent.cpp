@@ -27,4 +27,12 @@ namespace Helpers
 	{
 		return this->evt.get();
 	}
+
+	void WinApiEvent::ResetEvent() const
+	{
+		if (!::ResetEvent(this->evt.get()))
+		{
+			throw WinApiException();
+		}
+	}
 }

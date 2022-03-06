@@ -23,7 +23,7 @@ namespace Process
         const void* GetBuffer() const;
 
         void BeginRead();
-        Arg::BytesRead EndRead();
+        Arg::BytesRead EndRead(bool flush = false);
 
     private:
         Pipe& pipe;

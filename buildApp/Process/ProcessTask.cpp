@@ -5,136 +5,133 @@
 #include "PipeStdIn.h"
 #include "ProcessJobScope.h"
 #include "ProcessHelpers.h"
+#include "PseudoConsole.h"
 #include "Helpers/WinApiException.h"
 #include "Helpers/WinApiEvent.h"
 
 #include <Windows.h>
 #include <vector>
 
+/*
+* https://docs.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences
+* https://docs.microsoft.com/en-us/windows/console/setconsolemode
+* https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
+* https://github.com/microsoft/terminal
+* https://docs.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session
+*/
+
 namespace Process
 {
-	void ProcessTask::Run(const ProcessTaskParameters& params, IProcessTaskHandler& handler)
-	{
-		STARTUPINFOW startupInfo = {};
-		ProcessInformation procInfo;
+    void ProcessTask::Run(const ProcessTaskParameters& params, IProcessTaskHandler& handler)
+    {
+        ProcessInformation procInfo;
 
-		std::vector<wchar_t> cmdVec(params.commandLine.begin(), params.commandLine.end());
-		cmdVec.push_back(0);
+        std::vector<wchar_t> cmdVec(params.commandLine.begin(), params.commandLine.end());
+        cmdVec.push_back(0);
 
-		startupInfo.cb = sizeof startupInfo;
+        Pipe inputPipe(Arg::Async(true));
+        Pipe outputPipe(Arg::Async(true));
 
-		Pipe inputPipe(Arg::Async(true));
-		Pipe outputPipe(Arg::Async(true));
-		Pipe errorPipe(Arg::Async(true));
+        inputPipe.SetReadHandleInheritable(true);
+        outputPipe.SetWriteHandleInheritable(true);
 
-		inputPipe.SetReadHandleInheritable(true);
-		outputPipe.SetWriteHandleInheritable(true);
-		errorPipe.SetWriteHandleInheritable(true);
+        AsyncPipeReader outputReader(outputPipe, 4096);
 
-		AsyncPipeReader outputReader(outputPipe, 4096);
-		AsyncPipeReader errorReader(errorPipe, 4096);
+        PipeStdIn pipeStdIn(inputPipe);
 
-		// process reads pipe to get input
-		startupInfo.hStdInput = inputPipe.GetReadHandle();
-		// process writes pipe to give output
-		startupInfo.hStdOutput = outputPipe.GetWriteHandle();
-		// process writes pipe to give errors
-		startupInfo.hStdError = errorPipe.GetWriteHandle();
-		startupInfo.dwFlags |= STARTF_USESTDHANDLES;
+        {
+            PseudoConsole pseudoConsole(inputPipe.GetReadHandle(), outputPipe.GetWriteHandle());
+            auto startupInfo = pseudoConsole.GetStartupInfoForConsole();
 
-		ProcessJobScope procScope;
+            DWORD procFlags = EXTENDED_STARTUPINFO_PRESENT;
 
-		DWORD procFlags = 0; //CREATE_NO_WINDOW
-		// https://stackoverflow.com/questions/89588/assignprocesstojobobject-fails-with-access-denied-error-when-running-under-the
-		procFlags |= ProcessHelpers::IsThisProcessInJob() ? CREATE_BREAKAWAY_FROM_JOB : 0;
+            if (!CreateProcessW(
+                params.exePath.empty() ? nullptr : params.exePath.data(),
+                cmdVec.data(),
+                nullptr,
+                nullptr,
+                FALSE, // handles are inherited
+                procFlags,
+                nullptr,
+                nullptr,
+                &startupInfo.StartupInfo,
+                Helpers::GetAddressOf(procInfo)))
+            {
+                throw Helpers::WinApiException();
+            }
 
-		if (!CreateProcessW(
-			params.exePath.empty() ? nullptr : params.exePath.data(),
-			cmdVec.data(),
-			nullptr,
-			nullptr,
-			TRUE, // handles are inherited
-			procFlags,//CREATE_NO_WINDOW,
-			nullptr,
-			nullptr,
-			&startupInfo,
-			Helpers::GetAddressOf(procInfo)))
-		{
-			throw Helpers::WinApiException();
-		}
+            outputReader.BeginRead();
 
-		try
-		{
-			procScope.AddProcessToJob(procInfo.GetProcessHandle());
-		}
-		catch (const Helpers::WinApiException& /*ex*/)
-		{
-			// maybe it's not critical
-			// but it's reccomended to add process to the job to finish it with this process
-		}
+            HANDLE events[] =
+            {
+                outputReader.GetReadEvent(),
+                procInfo.GetProcessHandle()
+            };
 
-		outputReader.BeginRead();
-		errorReader.BeginRead();
+            // reading and waiting other process
+            while (true)
+            {
+                const DWORD EventsCount = static_cast<DWORD>(std::size(events));
+                DWORD status = WaitForMultipleObjectsEx(EventsCount, events, FALSE, INFINITE, TRUE);
+                DWORD evtIdx = status - WAIT_OBJECT_0;
 
-		HANDLE events[] =
-		{
-			outputReader.GetReadEvent(),
-			errorReader.GetReadEvent(),
-			procInfo.GetProcessHandle()
-		};
+                if (evtIdx < EventsCount)
+                {
+                    if (events[evtIdx] == outputReader.GetReadEvent())
+                    {
+                        Arg::BytesRead bytesRead = outputReader.EndRead();
+                        const void* buffer = outputReader.GetBuffer();
 
-		PipeStdIn pipeStdIn(inputPipe);
+                        handler.OnOutput(buffer, bytesRead, pipeStdIn);
 
-		while (true)
-		{
-			const DWORD EventsCount = static_cast<DWORD>(std::size(events));
-			DWORD status = WaitForMultipleObjects(EventsCount, events, FALSE, INFINITE);
-			DWORD evtIdx = status - WAIT_OBJECT_0;
+                        outputReader.BeginRead();
+                    }
+                    else if (events[evtIdx] == procInfo.GetProcessHandle())
+                    {
+                        // process exit
+                        break;
+                    }
+                    else
+                    {
+                        throw std::exception("Unknown event");
+                    }
+                }
+                else
+                {
+                    switch (status)
+                    {
+                    case WAIT_FAILED:
+                        throw Helpers::WinApiException();
+                    case WAIT_TIMEOUT:
+                        throw std::exception("Timeout");
+                    default:
+                        throw std::exception("Unknown status");
+                    }
+                }
+            }
+        }
 
-			if (evtIdx < EventsCount)
-			{
-				if (events[evtIdx] == outputReader.GetReadEvent())
-				{
-					Arg::BytesRead bytesRead = outputReader.EndRead();
-					const void* buffer = outputReader.GetBuffer();
+        try
+        {
+            // flush other process console output
+            while (true)
+            {
+                Arg::BytesRead bytesRead = outputReader.EndRead(true);
+                const void* buffer = outputReader.GetBuffer();
 
-					handler.OnOutput(buffer, bytesRead, pipeStdIn);
+                handler.OnOutput(buffer, bytesRead, pipeStdIn);
 
-					outputReader.BeginRead();
-				}
-				else if (events[evtIdx] == errorReader.GetReadEvent())
-				{
-					Arg::BytesRead bytesRead = errorReader.EndRead();
-					const void* buffer = errorReader.GetBuffer();
-
-					handler.OnError(buffer, bytesRead, pipeStdIn);
-
-					errorReader.BeginRead();
-				}
-				else if (events[evtIdx] == procInfo.GetProcessHandle())
-				{
-					// process exit
-					break;
-				}
-				else
-				{
-					throw std::exception("Unknown event");
-				}
-			}
-			else
-			{
-				switch (status)
-				{
-				case WAIT_FAILED:
-					throw Helpers::WinApiException();
-				case WAIT_TIMEOUT:
-					throw std::exception("Timeout");
-				default:
-					throw std::exception("Unknown status");
-				}
-			}
-		}
-
-		// TODO check if read out all errors and output needed ???
-	}
+                outputReader.BeginRead();
+            }
+        }
+        catch (const Helpers::WinApiException& ex)
+        {
+            // Overlapped I/O event is not in a signaled state
+            // this error is ok and means that flush in EndRead doesn't have any more data
+            if (ex.GetErrorCode() != 996)
+            {
+                throw;
+            }
+        }
+    }
 }

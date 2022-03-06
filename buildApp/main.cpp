@@ -1,48 +1,82 @@
 ﻿#include "BuildAppConfig.h"
-#include "Process/ProcessTask.h"
+#include "Helpers/Utf.h"
+#include "Process/Utf8ConsoleProcess.h"
 
-#include <iostream>
-#include <vector>
-#include <string>
+#include "PseudoConsoleTest.h"
 
-class TestProcessHandler final : public Process::IProcessTaskHandler
+class TestConsoleHandler : public Terminal::ITerminalHandler
 {
 public:
-	std::vector<uint8_t> outputSink;
-	std::vector<uint8_t> errorSink;
+	std::wstring str;
 
-	void OnOutput(const void* data, size_t size, Process::IStdIn& stdIn) override
+	void Print(const std::wstring_view string) override
 	{
-		const uint8_t* bytes = static_cast<const uint8_t*>(data);
+        if (carriageReturn && !lineFeed) {
+            while (!str.empty() && str.back() != '\r' && str.back() != '\n') {
+                str.pop_back();
+            }
+        }
 
-		outputSink.insert(outputSink.end(), bytes, bytes + size);
+		str += string;
+
+        carriageReturn = false;
+        lineFeed = false;
 	}
 
-	void OnError(const void* data, size_t size, Process::IStdIn& stdIn) override
-	{
-		const uint8_t* bytes = static_cast<const uint8_t*>(data);
+    void LineFeed(Terminal::LineFeedMode mode) override {
+        str += L"\r\n";
+        lineFeed = true;
+    }
 
-		errorSink.insert(outputSink.end(), bytes, bytes + size);
-	}
+    void CarriageReturn() override {
+        carriageReturn = true;
+    }
+
+private:
+    bool carriageReturn = false;
+    bool lineFeed = false;
 };
+
+void RunTest(std::wstring encoding);
+
+
 
 int main()
 {
-	Process::ProcessTaskParameters procParams;
+    if(false)
+	{
+		PseudoConsoleTest::Test();
+	}
 
-	//procParams.commandLine = L"ping google.com";
+	Helpers::Utf::Test();
 
-	procParams.exePath = LR"(C:\Users\sssr3\source\repos\ConsoleApp1Sharp\ConsoleApp1Sharp\bin\Release\netcoreapp3.1\ConsoleApp1Sharp.exe)";
-	procParams.commandLine = L"ConsoleApp1Sharp.exe u16";
-
-	TestProcessHandler handler;
-
-	Process::ProcessTask::Run(procParams, handler);
-
-	std::string outStr(handler.outputSink.begin(), handler.outputSink.end());
-	std::wstring woutStr(reinterpret_cast<const wchar_t*>(handler.outputSink.data()), reinterpret_cast<const wchar_t*>(handler.outputSink.data() + handler.outputSink.size()));
+	while (true)
+	{
+		RunTest(L"ascii");
+		RunTest(L"u7");
+		RunTest(L"u8");
+		RunTest(L"u16");
+		RunTest(L"---");
+	}
+	
 
 	return 0;
+}
+
+void RunTest(std::wstring encoding)
+{
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine = L"ping google.com";
+
+	/*procParams.exePath = LR"(C:\Users\sssr3\source\repos\ConsoleApp1Sharp\ConsoleApp1Sharp\bin\Release\netcoreapp3.1\ConsoleApp1Sharp.exe)";
+	procParams.commandLine = L"ConsoleApp1Sharp.exe " + encoding;*/
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+
+	return;
 }
 
 // https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
@@ -91,5 +125,3 @@ int main()
 //        }
 //    }
 //}
-
-

@@ -24,6 +24,8 @@ namespace Process
     {
         this->overlapped = this->MakeOverlapped();
 
+        std::fill(this->buffer.begin(), this->buffer.end(), '\0');
+
         if (!ReadFile(this->pipe.GetReadHandle(), this->buffer.data(), static_cast<DWORD>(this->buffer.size()), nullptr, &this->overlapped))
         {
             DWORD err = GetLastError();
@@ -35,11 +37,11 @@ namespace Process
         }
     }
 
-    Arg::BytesRead AsyncPipeReader::EndRead()
+    Arg::BytesRead AsyncPipeReader::EndRead(bool flush)
     {
         DWORD bytesRead = 0;
 
-        if (!GetOverlappedResult(this->pipe.GetReadHandle(), &this->overlapped, &bytesRead, TRUE))
+        if (!GetOverlappedResult(this->pipe.GetReadHandle(), &this->overlapped, &bytesRead, flush ? FALSE : TRUE))
         {
             throw Helpers::WinApiException();
         }
