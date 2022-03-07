@@ -1,2 +1,3 @@
 // the configured options and settings for BuildApp
 #define PROJECT_FOLDER "@CMAKE_CURRENT_SOURCE_DIR@"
+#define SOLUTION_FOLDER "@CMAKE_CURRENT_SOURCE_DIR@/../"

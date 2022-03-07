@@ -1,8 +1,14 @@
 ﻿#include "BuildAppConfig.h"
 #include "Helpers/Utf.h"
 #include "Process/Utf8ConsoleProcess.h"
+#include "Platform/WinPlatformFactory.h"
+#include "BuildAppConfig.h"
 
 #include "PseudoConsoleTest.h"
+
+#include <algorithm>
+#include <iterator>
+#include <thread>
 
 class TestConsoleHandler : public Terminal::ITerminalHandler
 {
@@ -37,13 +43,64 @@ private:
     bool lineFeed = false;
 };
 
+struct ZLibBuildConfig {
+	ZLibBuildConfig(std::wstring srcPath, std::wstring buildPathBase, std::wstring arch, std::wstring solutionConfig);
+
+	void Generate() const;
+	void Build() const;
+
+private:
+	std::wstring GetBuildPath() const;
+
+	std::wstring srcPath;
+	std::wstring buildPathBase;
+	std::wstring arch;
+	std::wstring solutionConfig;
+};
+
 void RunTest(std::wstring encoding);
-
-
+std::wstring ToWString(std::string_view str);
+std::wstring Quote(const std::wstring& str);
+void JoinAll(std::vector<std::thread>& tasks);
 
 int main()
 {
-    if(false)
+	std::vector<std::thread> tasks;
+
+	auto solutionPath = ToWString(SOLUTION_FOLDER);
+	auto zlibPath = solutionPath + L"zlib";
+	auto zlibBuildPath = solutionPath + L"!!BUILD_LIB";
+	auto platformFactory = Platform::CreateWinPlatformFactory();
+	auto fileSystem = platformFactory->CreateFilesystem(zlibPath);
+
+	fileSystem->CopyFile(L"zconfTmp.h", L"zconf.h");
+	fileSystem->DeleteFile(L"zconf.h");
+
+	auto zlibx64Rel = ZLibBuildConfig(zlibPath, zlibBuildPath, L"x64", L"Release");
+	auto zlibx64Dbg = ZLibBuildConfig(zlibPath, zlibBuildPath, L"x64", L"Debug");
+
+	auto zlibWin32Rel = ZLibBuildConfig(zlibPath, zlibBuildPath, L"Win32", L"Release");
+	auto zlibWin32Dbg = ZLibBuildConfig(zlibPath, zlibBuildPath, L"Win32", L"Debug");
+
+	tasks.push_back(std::thread(&ZLibBuildConfig::Generate, std::cref(zlibx64Rel)));
+	tasks.push_back(std::thread(&ZLibBuildConfig::Generate, std::cref(zlibx64Dbg)));
+	tasks.push_back(std::thread(&ZLibBuildConfig::Generate, std::cref(zlibWin32Rel)));
+	tasks.push_back(std::thread(&ZLibBuildConfig::Generate, std::cref(zlibWin32Dbg)));
+
+	JoinAll(tasks);
+
+	tasks.push_back(std::thread(&ZLibBuildConfig::Build, std::cref(zlibx64Rel)));
+	tasks.push_back(std::thread(&ZLibBuildConfig::Build, std::cref(zlibx64Dbg)));
+	tasks.push_back(std::thread(&ZLibBuildConfig::Build, std::cref(zlibWin32Rel)));
+	tasks.push_back(std::thread(&ZLibBuildConfig::Build, std::cref(zlibWin32Dbg)));
+
+	JoinAll(tasks);
+
+	fileSystem->CopyFile(L"zconf.h", L"zconfTmp.h");
+	fileSystem->DeleteFile(L"zconfTmp.h");
+	fileSystem->DeleteFile(L"zconf.h.included");
+
+    /*if(false)
 	{
 		PseudoConsoleTest::Test();
 	}
@@ -57,7 +114,7 @@ int main()
 		RunTest(L"u8");
 		RunTest(L"u16");
 		RunTest(L"---");
-	}
+	}*/
 	
 
 	return 0;
@@ -77,6 +134,59 @@ void RunTest(std::wstring encoding)
 	Process::Utf8ConsoleProcess::Run(procParams, handler);
 
 	return;
+}
+
+std::wstring ToWString(std::string_view str) {
+	std::wstring wstr;
+
+	wstr.reserve(str.size());
+
+	std::transform(str.begin(), str.end(), std::back_inserter(wstr), [](char ch) { return static_cast<wchar_t>(ch); });
+
+	return wstr;
+}
+
+std::wstring Quote(const std::wstring& str) {
+	return L'\"' + str + L'\"';
+}
+
+void JoinAll(std::vector<std::thread>& tasks) {
+	for (auto& i : tasks) {
+		i.join();
+	}
+
+	tasks.clear();
+}
+
+ZLibBuildConfig::ZLibBuildConfig(std::wstring srcPath, std::wstring buildPathBase, std::wstring arch, std::wstring solutionConfig)
+	: srcPath(std::move(srcPath))
+	, buildPathBase(std::move(buildPathBase))
+	, arch(std::move(arch))
+	, solutionConfig(std::move(solutionConfig))
+{}
+
+void ZLibBuildConfig::Generate() const {
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine = L"cmake -G \"Visual Studio 16 2019\" -A " + std::wstring(arch) + L" -S " + Quote(this->srcPath) + L" -B " + this->GetBuildPath();
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+void ZLibBuildConfig::Build() const {
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine = L"cmake --build " + this->GetBuildPath() + L" --target \"zlib\" " + L" --config " + this->solutionConfig;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+std::wstring ZLibBuildConfig::GetBuildPath() const {
+	return Quote(std::wstring(this->buildPathBase) + L"/zlib_" + std::wstring(arch) + L'_' + this->solutionConfig);
 }
 
 // https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
