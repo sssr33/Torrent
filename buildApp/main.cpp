@@ -46,11 +46,15 @@ private:
 struct ZLibBuildConfig {
 	ZLibBuildConfig(std::wstring srcPath, std::wstring buildPathBase, std::wstring arch, std::wstring solutionConfig);
 
-	void Generate() const;
-	void Build() const;
+	void DoAllSteps() const;
 
 private:
+	void Generate() const;
+	void Build() const;
+	void Install() const;
+
 	std::wstring GetBuildPath() const;
+	std::wstring GetInstallPath() const;
 
 	std::wstring srcPath;
 	std::wstring buildPathBase;
@@ -82,17 +86,10 @@ int main()
 	auto zlibWin32Rel = ZLibBuildConfig(zlibPath, zlibBuildPath, L"Win32", L"Release");
 	auto zlibWin32Dbg = ZLibBuildConfig(zlibPath, zlibBuildPath, L"Win32", L"Debug");
 
-	tasks.push_back(std::thread(&ZLibBuildConfig::Generate, std::cref(zlibx64Rel)));
-	tasks.push_back(std::thread(&ZLibBuildConfig::Generate, std::cref(zlibx64Dbg)));
-	tasks.push_back(std::thread(&ZLibBuildConfig::Generate, std::cref(zlibWin32Rel)));
-	tasks.push_back(std::thread(&ZLibBuildConfig::Generate, std::cref(zlibWin32Dbg)));
-
-	JoinAll(tasks);
-
-	tasks.push_back(std::thread(&ZLibBuildConfig::Build, std::cref(zlibx64Rel)));
-	tasks.push_back(std::thread(&ZLibBuildConfig::Build, std::cref(zlibx64Dbg)));
-	tasks.push_back(std::thread(&ZLibBuildConfig::Build, std::cref(zlibWin32Rel)));
-	tasks.push_back(std::thread(&ZLibBuildConfig::Build, std::cref(zlibWin32Dbg)));
+	tasks.push_back(std::thread(&ZLibBuildConfig::DoAllSteps, std::cref(zlibx64Rel)));
+	tasks.push_back(std::thread(&ZLibBuildConfig::DoAllSteps, std::cref(zlibx64Dbg)));
+	tasks.push_back(std::thread(&ZLibBuildConfig::DoAllSteps, std::cref(zlibWin32Rel)));
+	tasks.push_back(std::thread(&ZLibBuildConfig::DoAllSteps, std::cref(zlibWin32Dbg)));
 
 	JoinAll(tasks);
 
@@ -165,10 +162,16 @@ ZLibBuildConfig::ZLibBuildConfig(std::wstring srcPath, std::wstring buildPathBas
 	, solutionConfig(std::move(solutionConfig))
 {}
 
+void ZLibBuildConfig::DoAllSteps() const {
+	this->Generate();
+	this->Build();
+	this->Install();
+}
+
 void ZLibBuildConfig::Generate() const {
 	Process::ProcessTaskParameters procParams;
 
-	procParams.commandLine = L"cmake -G \"Visual Studio 16 2019\" -A " + std::wstring(arch) + L" -S " + Quote(this->srcPath) + L" -B " + this->GetBuildPath();
+	procParams.commandLine = L"cmake -G \"Visual Studio 16 2019\" -A " + std::wstring(arch) + L" -S " + Quote(this->srcPath) + L" -B " + this->GetBuildPath() + L" --install-prefix " + this->GetInstallPath();
 
 	auto handler = std::make_shared<TestConsoleHandler>();
 
@@ -179,14 +182,28 @@ void ZLibBuildConfig::Build() const {
 	Process::ProcessTaskParameters procParams;
 
 	procParams.commandLine = L"cmake --build " + this->GetBuildPath() + L" --target \"zlib\" " + L" --config " + this->solutionConfig;
-
 	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
 
+	procParams.commandLine = L"cmake --build " + this->GetBuildPath() + L" --target \"zlibstatic\" " + L" --config " + this->solutionConfig;
+	handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+void ZLibBuildConfig::Install() const {
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine = L"cmake --install " + this->GetBuildPath() + L" --config " + this->solutionConfig;
+	auto handler = std::make_shared<TestConsoleHandler>();
 	Process::Utf8ConsoleProcess::Run(procParams, handler);
 }
 
 std::wstring ZLibBuildConfig::GetBuildPath() const {
 	return Quote(std::wstring(this->buildPathBase) + L"/zlib_" + std::wstring(arch) + L'_' + this->solutionConfig);
+}
+
+std::wstring ZLibBuildConfig::GetInstallPath() const {
+	return Quote(std::wstring(this->buildPathBase) + L"/zlib_" + std::wstring(arch) + L'_' + this->solutionConfig) + L"/install";
 }
 
 // https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
