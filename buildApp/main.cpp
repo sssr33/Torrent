@@ -15,6 +15,10 @@ class TestConsoleHandler : public Terminal::ITerminalHandler
 public:
 	std::wstring str;
 
+	void SetStdIn(Process::IStdIn* input) override {
+		this->input = input;
+	}
+
 	void Print(const std::wstring_view string) override
 	{
         if (carriageReturn && !lineFeed) {
@@ -24,6 +28,14 @@ public:
         }
 
 		str += string;
+
+		if (!done && str.find(L"0x213") != std::wstring::npos) {
+			done = true;
+
+			std::string str = "echo 00xx\r\n";
+
+			this->input->Write(str.data(), str.size());
+		}
 
         carriageReturn = false;
         lineFeed = false;
@@ -39,8 +51,18 @@ public:
     }
 
 private:
+	bool done = false;
+	Process::IStdIn* input = nullptr;
     bool carriageReturn = false;
     bool lineFeed = false;
+};
+
+class TestProgress : public Filesystem::IFilesystemProgress {
+public:
+	void ReportProgress(float progress) override {
+		int stop = 234;
+		stop++;
+	}
 };
 
 struct ZLibBuildConfig {
@@ -69,12 +91,23 @@ void JoinAll(std::vector<std::thread>& tasks);
 
 int main()
 {
+	//RunTest(L"ascii");
+
 	std::vector<std::thread> tasks;
+
+	const std::wstring buildLibFolder = L"!!BUILD_LIB";
 
 	auto solutionPath = ToWString(SOLUTION_FOLDER);
 	auto zlibPath = solutionPath + L"zlib";
-	auto zlibBuildPath = solutionPath + L"!!BUILD_LIB";
+	auto zlibBuildPath = solutionPath + buildLibFolder;
 	auto platformFactory = Platform::CreateWinPlatformFactory();
+
+	{
+		TestProgress testProgress;
+		auto fileSystem = platformFactory->CreateFilesystem(solutionPath);
+		fileSystem->DeleteFolder(buildLibFolder, &testProgress);
+	}
+
 	auto fileSystem = platformFactory->CreateFilesystem(zlibPath);
 
 	fileSystem->CopyFile(L"zconfTmp.h", L"zconf.h");
@@ -121,7 +154,9 @@ void RunTest(std::wstring encoding)
 {
 	Process::ProcessTaskParameters procParams;
 
-	procParams.commandLine = L"ping google.com";
+	//procParams.commandLine = L"cmd /k \"ping google.com & ping 3dnews.com & exit\"";
+
+	procParams.commandLine = L"cmd /k \"echo 0x213\"";
 
 	/*procParams.exePath = LR"(C:\Users\sssr3\source\repos\ConsoleApp1Sharp\ConsoleApp1Sharp\bin\Release\netcoreapp3.1\ConsoleApp1Sharp.exe)";
 	procParams.commandLine = L"ConsoleApp1Sharp.exe " + encoding;*/

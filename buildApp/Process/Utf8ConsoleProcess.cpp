@@ -11,10 +11,16 @@ namespace Process
     }
 
     Utf8ConsoleProcess::ProcessHandler::ProcessHandler(std::shared_ptr<Terminal::ITerminalHandler> handler)
-        : terminalParser(Terminal::CreateDefaultTerminalParser(std::move(handler)))
+        : terminalParser(Terminal::CreateDefaultTerminalParser(handler))
+        , handler(handler)
     {}
 
-    void Utf8ConsoleProcess::ProcessHandler::OnOutput(const void* data, size_t size, Process::IStdIn& /*stdIn*/)
+    void Utf8ConsoleProcess::ProcessHandler::SetStdIn(IStdIn* input)
+    {
+        this->handler->SetStdIn(input);
+    }
+
+    void Utf8ConsoleProcess::ProcessHandler::OnOutput(const void* data, size_t size)
     {
         auto inputData = std::string(static_cast<const char*>(data), static_cast<const char*>(data) + size);
         auto w16Str = Helpers::Utf::Cvt<std::wstring>(inputData);
@@ -22,7 +28,7 @@ namespace Process
         this->terminalParser->Process(w16Str);
     }
 
-    void Utf8ConsoleProcess::ProcessHandler::OnError(const void* data, size_t size, Process::IStdIn& stdIn)
+    void Utf8ConsoleProcess::ProcessHandler::OnError(const void* data, size_t size)
     {
         throw std::exception("Utf8ConsoleProcess error");
     }

@@ -8,6 +8,7 @@
 #include "PseudoConsole.h"
 #include "Helpers/WinApiException.h"
 #include "Helpers/WinApiEvent.h"
+#include "Helpers/Scope.h"
 
 #include <Windows.h>
 #include <vector>
@@ -68,6 +69,12 @@ namespace Process
                 procInfo.GetProcessHandle()
             };
 
+            handler.SetStdIn(&pipeStdIn);
+            auto handlerStdInScope = MakeScope([&handler]()
+                {
+                    handler.SetStdIn(nullptr);
+                });
+
             // reading and waiting other process
             while (true)
             {
@@ -82,7 +89,7 @@ namespace Process
                         Arg::BytesRead bytesRead = outputReader.EndRead();
                         const void* buffer = outputReader.GetBuffer();
 
-                        handler.OnOutput(buffer, bytesRead, pipeStdIn);
+                        handler.OnOutput(buffer, bytesRead);
 
                         outputReader.BeginRead();
                     }
@@ -119,7 +126,7 @@ namespace Process
                 Arg::BytesRead bytesRead = outputReader.EndRead(true);
                 const void* buffer = outputReader.GetBuffer();
 
-                handler.OnOutput(buffer, bytesRead, pipeStdIn);
+                handler.OnOutput(buffer, bytesRead);
 
                 outputReader.BeginRead();
             }

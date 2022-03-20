@@ -1,0 +1,5 @@
+perl Configure VC-WIN32 --debug --openssldir=C:\WorkChaikovsky\repsPersonal\Torrent\openssl\build_inst\dir --prefix=C:\WorkChaikovsky\repsPersonal\Torrent\openssl\build_inst\prefix --with-zlib-include=C:\WorkChaikovsky\repsPersonal\Torrent\!!BUILD_LIB\zlib_Win32_Debug\install\include --with-zlib-lib=C:\WorkChaikovsky\repsPersonal\Torrent\!!BUILD_LIB\zlib_Win32_Debug\install\lib\zlibstaticd.lib zlib
+
+perl Configure VC-WIN32 --release --openssldir=C:\WorkChaikovsky\repsPersonal\Torrent\openssl\build_inst\dir --prefix=C:\WorkChaikovsky\repsPersonal\Torrent\openssl\build_inst\prefix --with-zlib-include=C:\WorkChaikovsky\repsPersonal\Torrent\!!BUILD_LIB\\zlib_Win32_Release\install\include --with-zlib-lib=C:\WorkChaikovsky\repsPersonal\Torrent\!!BUILD_LIB\\zlib_Win32_Release\install\lib\zlibstatic.lib zlib
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat" x64

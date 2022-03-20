@@ -1,4 +1,5 @@
 #pragma once
+#include "Process/IStdIn.h"
 
 #include <string>
 
@@ -14,6 +15,8 @@ namespace Terminal {
 	{
 	public:
 		virtual ~ITerminalHandler() = default;
+
+		virtual void SetStdIn(Process::IStdIn* input) = 0;
 
 		virtual void Print(const std::wstring_view string) = 0;
 		virtual void LineFeed(LineFeedMode mode) = 0;
