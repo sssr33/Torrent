@@ -1,4 +1,5 @@
 #include "FilesystemWin.h"
+#include "Helpers/Scope.h"
 
 #include <Windows.h>
 #include <wrl.h>
@@ -13,6 +14,10 @@ namespace Filesystem {
     class FilesystemWinProgress : public Microsoft::WRL::RuntimeClass<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::RuntimeClassType::ClassicCom>, IFileOperationProgressSink>
     {
     public:
+        FilesystemWinProgress(IFilesystemProgress* progress)
+            : progress(progress)
+        {}
+
         virtual HRESULT STDMETHODCALLTYPE StartOperations(void) override {
             return S_OK;
         }
@@ -76,7 +81,23 @@ namespace Filesystem {
 
         virtual HRESULT STDMETHODCALLTYPE PreDeleteItem(
             /* [in] */ DWORD dwFlags,
-            /* [in] */ __RPC__in_opt IShellItem* psiItem) override {
+            /* [in] */ __RPC__in_opt IShellItem* psiItem) override
+        {
+            /*if (psiItem) {
+                HRESULT hr = S_OK;
+                LPWSTR name = nullptr;
+                auto nameScope = MakeScope([&name]()
+                    {
+                        if (name) {
+                            CoTaskMemFree(name);
+                        }
+                    });
+
+                hr = psiItem->GetDisplayName(SIGDN_NORMALDISPLAY, &name);
+
+                int stop = 34;
+            }*/
+
             return S_OK;
         }
 
@@ -109,6 +130,12 @@ namespace Filesystem {
         virtual HRESULT STDMETHODCALLTYPE UpdateProgress(
             /* [in] */ UINT iWorkTotal,
             /* [in] */ UINT iWorkSoFar) override {
+
+            if (iWorkTotal != 0 && progress) {
+                float progressValue = static_cast<float>(iWorkSoFar) / static_cast<float>(iWorkTotal);
+                progress->ReportProgress(progressValue);
+            }
+
             return S_OK;
         }
 
@@ -123,6 +150,9 @@ namespace Filesystem {
         virtual HRESULT STDMETHODCALLTYPE ResumeTimer(void) override {
             return S_OK;
         }
+
+    private:
+        IFilesystemProgress* progress = nullptr;
     };
 
     FilesystemWin::FilesystemWin(std::wstring baseFolder)
@@ -162,6 +192,10 @@ namespace Filesystem {
 
         hr = SHCreateItemFromParsingName(buffer.data(), nullptr, IID_PPV_ARGS(folder.GetAddressOf()));
         if (FAILED(hr)) {
+            if (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) && progress) {
+                progress->ReportProgress(1.f);
+            }
+
             return;
         }
 
@@ -177,9 +211,19 @@ namespace Filesystem {
             return;
         }
 
-        auto progressTest = Microsoft::WRL::Make<FilesystemWinProgress>();
+        DWORD cookie = 0;
+        auto progressTest = Microsoft::WRL::Make<FilesystemWinProgress>(progress);
 
-        hr = fileOp->DeleteItem(folder.Get(), progressTest.Get());
+        hr = fileOp->Advise(progressTest.Get(), &cookie);
+        if (FAILED(hr)) {
+            return;
+        }
+        auto unadviseScope = MakeScope([&fileOp, cookie]()
+            {
+                fileOp->Unadvise(cookie);
+            });
+
+        hr = fileOp->DeleteItem(folder.Get(), nullptr);
         if (FAILED(hr)) {
             return;
         }
