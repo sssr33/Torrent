@@ -4,6 +4,7 @@
 #include <Windows.h>
 #include <wrl.h>
 #include <Shobjidl.h>
+#include <shlobj.h>
 #include <algorithm>
 #include <vector>
 
@@ -170,6 +171,29 @@ namespace Filesystem {
     void FilesystemWin::DeleteFile(const std::wstring_view path) {
         auto filePath = this->GetFullPath(path);
         DeleteFileW(filePath.c_str());
+    }
+
+    void FilesystemWin::CreateFolder(const std::wstring_view path) {
+        auto folderPath = this->GetFullPath(path);
+
+        DWORD bufSize = GetFullPathNameW(folderPath.c_str(), 0, nullptr, nullptr);
+        if (!bufSize) {
+            return;
+        }
+
+        std::vector<wchar_t> buffer;
+        buffer.resize(bufSize, L'\0');
+
+        if (!GetFullPathNameW(folderPath.c_str(), static_cast<DWORD>(buffer.size()), buffer.data(), nullptr)) {
+            return;
+        }
+
+        HRESULT hr = S_OK;
+        // use SHCreateDirectoryExW to create create all intermediate folders
+        hr = SHCreateDirectoryExW(nullptr, buffer.data(), nullptr);
+        // TODO add error checking and not throw exception when folder already exists
+
+        return;
     }
 
     void FilesystemWin::DeleteFolder(const std::wstring_view path, IFilesystemProgress* progress) {

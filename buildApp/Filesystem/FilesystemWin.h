@@ -10,6 +10,8 @@ namespace Filesystem {
 
         void CopyFile(const std::wstring_view dst, const std::wstring_view src) override;
         void DeleteFile(const std::wstring_view path) override;
+
+        void CreateFolder(const std::wstring_view path) override;
         void DeleteFolder(const std::wstring_view path, IFilesystemProgress* progress = nullptr) override;
 
     private:
