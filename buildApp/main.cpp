@@ -11,6 +11,7 @@
 #include <thread>
 #include <stdexcept>
 #include <iostream>
+#include <functional>
 
 class TestConsoleHandler : public Terminal::ITerminalHandler
 {
@@ -70,17 +71,36 @@ public:
 enum class BuildConfig {
 	Unknown,
 	Debug,
-	Release
+	Release,
+
+	Count
 };
 
 enum class BuildArch {
 	Unknown,
 	Win32,
-	x64
+	x64,
+
+	Count
 };
 
 std::wstring ToDefaultString(BuildArch arch);
 std::wstring ToDefaultString(BuildConfig config);
+
+template<class FnT = std::function<void(BuildArch, BuildConfig)>>
+void ForAllArchConfig(FnT fn) {
+	for (auto arch = static_cast<std::underlying_type_t<BuildArch>>(BuildArch::Unknown) + 1;
+		arch < static_cast<std::underlying_type_t<BuildArch>>(BuildArch::Count);
+		++arch)
+	{
+		for (auto config = static_cast<std::underlying_type_t<BuildConfig>>(BuildConfig::Unknown) + 1;
+			config < static_cast<std::underlying_type_t<BuildConfig>>(BuildConfig::Count);
+			++config)
+		{
+			fn(static_cast<BuildArch>(arch), static_cast<BuildConfig>(config));
+		}
+	}
+}
 
 class LibBuild {
 public:
@@ -137,6 +157,7 @@ private:
 
 	std::wstring GetBuildFolder() const;
 	std::wstring GetBuildPath() const;
+	std::wstring GetBaseCmdCommand() const;
 
 	std::wstring openSslSrcPath;
 	std::wstring buildPathBase;
@@ -151,8 +172,8 @@ std::wstring ToWString(std::string_view str);
 std::wstring Quote(const std::wstring& str);
 void JoinAll(std::vector<std::thread>& tasks);
 
-#define BUILD_CLEAN 0
-#define BUILD_ZLIB 0
+#define BUILD_CLEAN 1
+#define BUILD_ZLIB 1
 #define BUILD_OPENSSL 1
 #define BUILD_BOOST 1
 #define BUILD_LIBTORRENT 1
@@ -188,11 +209,10 @@ int main()
 
 	std::vector<ZLibBuild> zlibBuilds;
 
-	zlibBuilds.emplace_back(BuildArch::x64, BuildConfig::Release, zlibSrcPath, buildPath);
-	zlibBuilds.emplace_back(BuildArch::x64, BuildConfig::Debug, zlibSrcPath, buildPath);
-
-	zlibBuilds.emplace_back(BuildArch::Win32, BuildConfig::Release, zlibSrcPath, buildPath);
-	zlibBuilds.emplace_back(BuildArch::Win32, BuildConfig::Debug, zlibSrcPath, buildPath);
+	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
+		{
+			zlibBuilds.emplace_back(arch, config, zlibSrcPath, buildPath);
+		});
 
 #if BUILD_ZLIB
 	for (auto& build : zlibBuilds) {
@@ -210,10 +230,21 @@ int main()
 
 	std::cout << "OpenSSL build start" << "\n";
 
-	auto buildFolderFs = platformFactory->CreateFilesystem(buildPath);
+	std::vector<OpenSSLBuild> openSslBuilds;
 
-	auto openSslx64Rel = OpenSSLBuild(BuildArch::x64, BuildConfig::Release, openSslSrcPath, buildPath, zlibBuilds, std::move(buildFolderFs));
-	openSslx64Rel.DoAllSteps();
+	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
+		{
+			auto buildFolderFs = platformFactory->CreateFilesystem(buildPath);
+			openSslBuilds.emplace_back(arch, config, openSslSrcPath, buildPath, zlibBuilds, std::move(buildFolderFs));
+		});
+
+#if BUILD_OPENSSL
+	for (auto& build : openSslBuilds) {
+		tasks.push_back(std::thread(&OpenSSLBuild::DoAllSteps, std::cref(build)));
+	}
+
+	JoinAll(tasks);
+#endif
 
 	std::cout << "OpenSSL build finished" << "\n\n";
 
@@ -416,25 +447,16 @@ void OpenSSLBuild::DoAllSteps() const {
 }
 
 void OpenSSLBuild::Configure() const {
-	Process::ProcessTaskParameters procParams;
-
-	/*
-	* perl C:\work_Chaikovsky\!myReps\Torrent\openssl\Configure VC-WIN32 --release --openssldir=C:\work_Chaikovsky\!myReps\Torrent\openssl\build_inst\dir --prefix=C:\work_Chaikovsky\!myReps\Torrent\openssl\build_inst\prefix --with-zlib-include=C:\work_Chaikovsky\!myReps\Torrent\!!BUILD_LIB\zlib_Win32_Release\install\include --with-zlib-lib=C:\work_Chaikovsky\!myReps\Torrent\!!BUILD_LIB\zlib_Win32_Release\install\lib\zlibstatic.lib zlib
-	*/
-
 	this->buildFolderFs->CreateFolder(this->GetBuildFolder());
 
-	const wchar_t* vcvarsallArch = nullptr;
 	const wchar_t* openSslArch = nullptr;
 	const wchar_t* openSslConfig = nullptr;
 
 	switch (this->GetBuildArch()) {
 	case BuildArch::Win32:
-		vcvarsallArch = L"x86";
 		openSslArch = L"VC-WIN32";
 		break;
 	case BuildArch::x64:
-		vcvarsallArch = L"x64";
 		openSslArch = L"VC-WIN64A";
 		break;
 	default:
@@ -452,39 +474,47 @@ void OpenSSLBuild::Configure() const {
 		throw std::runtime_error("OpenSSLBuild::Configure: bad config");
 	}
 
-	auto opensslDir = Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/build_inst/dir");
-	auto opensslPrefix = Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/build_inst/prefix");
+	auto opensslDir = Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/install/dir");
+	auto opensslPrefix = Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/install/prefix");
 	auto zlibIncludePath = this->zlibBuild.GetIncludePath();
 	auto zlibLibPath = this->zlibBuild.GetStaticLibPath();
 
-	/*procParams.commandLine =
-		std::wstring()
-		+ L"cmd.exe /C \"echo %PATH% && nasm.exe\""
-		;*/
+	Process::ProcessTaskParameters procParams;
 
 	procParams.commandLine =
-		std::wstring()
-		+ L"cmd.exe /C "
-		+ L"cd /d " + this->GetBuildPath()
-		+ L" && "
-		+ Quote(LR"(C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat)") + L" x64"
+		this->GetBaseCmdCommand()
 		+ L" && "
 		+ L"perl " + this->GetSrcPath() + L"/Configure" + L" " + openSslArch + L" " + openSslConfig + L" --openssldir=" + opensslDir + L" --prefix=" + opensslPrefix + L" --with-zlib-include=" + zlibIncludePath + L" --with-zlib-lib=" + zlibLibPath + L" zlib"
 		;
 
 	auto handler = std::make_shared<TestConsoleHandler>();
-
 	Process::Utf8ConsoleProcess::Run(procParams, handler);
-
-	int stop = 234;
 }
 
 void OpenSSLBuild::Build() const {
+	Process::ProcessTaskParameters procParams;
 
+	procParams.commandLine =
+		this->GetBaseCmdCommand()
+		+ L" && "
+		+ L"nmake"
+		;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
 }
 
 void OpenSSLBuild::Install() const {
+	Process::ProcessTaskParameters procParams;
 
+	procParams.commandLine =
+		this->GetBaseCmdCommand()
+		+ L" && "
+		+ L"nmake install"
+		;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
 }
 
 const ZLibBuild& OpenSSLBuild::FindZlibBuild(const std::vector<ZLibBuild>& zlibBuilds) const {
@@ -509,6 +539,34 @@ std::wstring OpenSSLBuild::GetBuildFolder() const {
 
 std::wstring OpenSSLBuild::GetBuildPath() const {
 	return Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder());
+}
+
+std::wstring OpenSSLBuild::GetBaseCmdCommand() const {
+	const wchar_t* vcvarsallArch = nullptr;
+
+	switch (this->GetBuildArch()) {
+	case BuildArch::Win32:
+		vcvarsallArch = L"x86";
+		break;
+	case BuildArch::x64:
+		vcvarsallArch = L"x64";
+		break;
+	default:
+		throw std::runtime_error("OpenSSLBuild::Configure: bad arch");
+	}
+
+	// commands:
+	// 1. cd to build folder
+	// 2. apply VC environment
+	auto baseCommand =
+		std::wstring()
+		+ L"cmd.exe /C "
+		+ L"cd /d " + this->GetBuildPath()
+		+ L" && "
+		+ Quote(LR"(C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat)") + L" " + vcvarsallArch
+		;
+
+	return baseCommand;
 }
 
 // https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
