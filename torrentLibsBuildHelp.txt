@@ -31,6 +31,7 @@ b2 link=shared threading=multi runtime-link=shared stage
 
 .\b2 release address-model=64 threading=multi --toolset=msvc -j 8 link=static runtime-link=shared --build-dir="C:\work_Chaikovsky\!myReps\Torrent\!!BUILD_LIB\boost_test\build\x64" --stagedir="C:\work_Chaikovsky\!myReps\Torrent\!!BUILD_LIB\boost_test\stage\x64" -sZLIB_INCLUDE="C:\work_Chaikovsky\!myReps\Torrent\!!BUILD_LIB\zlib_x64_Debug\install\include" -sZLIB_LIBPATH="C:\work_Chaikovsky\!myReps\Torrent\!!BUILD_LIB\zlib_x64_Debug\install\lib" -sZLIB_SOURCE="C:\work_Chaikovsky\!myReps\Torrent\zlib"
 
+b2 --prefix="C:/work_Chaikovsky/!myReps/Torrent/buildApp/../!!BUILD_LIB/boost_Win32_Debug/prefix" install
 
 https://stackoverflow.com/questions/33566782/building-all-of-boost-in-a-few-minutes
 

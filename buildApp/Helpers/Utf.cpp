@@ -270,7 +270,7 @@ namespace Helpers
 
         int length = MultiByteToWideChar(
             CP_UTF8,
-            MB_ERR_INVALID_CHARS,
+            /*MB_ERR_INVALID_CHARS*/ 0, // TODO check why error when installing boost
             u8.data(),
             static_cast<int>(u8.size()),
             dst,
@@ -291,7 +291,7 @@ namespace Helpers
 
         int length = WideCharToMultiByte(
             CP_UTF8,
-            WC_ERR_INVALID_CHARS,
+            /*WC_ERR_INVALID_CHARS*/ 0, // TODO check why error when installing boost
             reinterpret_cast<const wchar_t*>(u16.data()),
             static_cast<int>(u16.size()),
             dst,

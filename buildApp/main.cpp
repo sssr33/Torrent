@@ -186,6 +186,7 @@ private:
 	void Bootstrap() const;
 	void Configure() const;
 	void Build() const;
+	void Install() const;
 	void BootstrapCleanUp() const;
 
 	std::wstring GetBuildFolder() const;
@@ -194,6 +195,7 @@ private:
 	std::wstring GetVsVarsCommand() const;
 	std::wstring GetBoostBuildConfigName() const;
 	std::wstring GetBoostAddressModelNumber() const;
+	std::wstring GetBoostPrefixDir() const;
 	std::wstring GetBoostBuildDir() const;
 	std::wstring GetBoostStageDir() const;
 
@@ -212,9 +214,9 @@ std::wstring ToWString(std::string_view str);
 std::wstring Quote(const std::wstring& str);
 void JoinAll(std::vector<std::thread>& tasks);
 
-#define BUILD_CLEAN 1
-#define BUILD_ZLIB 1
-#define BUILD_OPENSSL 1
+#define BUILD_CLEAN 0
+#define BUILD_ZLIB 0
+#define BUILD_OPENSSL 0
 #define BUILD_BOOST 1
 #define BUILD_LIBTORRENT 1
 
@@ -231,6 +233,7 @@ int main()
 	auto zlibSrcPath = solutionPath + L"zlib";
 	auto openSslSrcPath = solutionPath + L"openssl";
 	auto boostSrcPath = solutionPath + L"boost";
+	auto libtorrentSrcPath = solutionPath + L"libtorrent";
 	auto platformFactory = Platform::CreateWinPlatformFactory();
 
 #if BUILD_CLEAN
@@ -663,8 +666,10 @@ void BoostBuild::InitJobCount(size_t jobCount) {
 
 void BoostBuild::DoAllSteps() const {
 	std::call_once(BoostBuild::bootstrapOnce, &BoostBuild::Bootstrap, this);
+
 	this->Configure();
 	this->Build();
+	this->Install();
 
 	if (this->inProgressBuildsCount) {
 		int inProgressBuildCurrentCount = --(*this->inProgressBuildsCount);
@@ -711,6 +716,7 @@ void BoostBuild::Build() const {
 		+ L" -j " + std::to_wstring(this->jobCount)
 		+ L" link=static"
 		+ L" runtime-link=shared"
+		+ L" --prefix=" + this->GetBoostPrefixDir()
 		+ L" --build-dir=" + this->GetBoostBuildDir()
 		+ L" --stagedir=" + this->GetBoostStageDir()
 		+ L" -sZLIB_INCLUDE=" + this->zlibBuild.GetIncludePath()
@@ -728,6 +734,42 @@ void BoostBuild::Build() const {
 		+ this->GetVsVarsCommand()
 		+ L" && "
 		+ buildCmd
+		;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+void BoostBuild::Install() const {
+	auto installCmd =
+		std::wstring()
+		+ L"b2"
+		+ L" " + this->GetBoostBuildConfigName()
+		+ L" address-model=" + this->GetBoostAddressModelNumber()
+		+ L" threading=multi"
+		+ L" --toolset=msvc"
+		+ L" -j " + std::to_wstring(this->jobCount)
+		+ L" link=static"
+		+ L" runtime-link=shared"
+		+ L" --prefix=" + this->GetBoostPrefixDir()
+		+ L" --build-dir=" + this->GetBoostBuildDir()
+		+ L" --stagedir=" + this->GetBoostStageDir()
+		+ L" -sZLIB_INCLUDE=" + this->zlibBuild.GetIncludePath()
+		+ L" -sZLIB_LIBPATH=" + this->zlibBuild.GetStaticLibPath()
+		+ L" -sZLIB_SOURCE=" + this->zlibBuild.GetSrcPath()
+		+ L" install"
+		;
+
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine =
+		std::wstring()
+		+ L"cmd.exe /C "
+		+ L"cd /d " + this->GetSrcPath()
+		+ L" && "
+		+ this->GetVsVarsCommand()
+		+ L" && "
+		+ installCmd
 		;
 
 	auto handler = std::make_shared<TestConsoleHandler>();
@@ -813,6 +855,10 @@ std::wstring BoostBuild::GetBoostAddressModelNumber() const {
 	default:
 		throw std::runtime_error("BoostBuild::Configure: bad arch");
 	}
+}
+
+std::wstring BoostBuild::GetBoostPrefixDir() const {
+	return Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/prefix");
 }
 
 std::wstring BoostBuild::GetBoostBuildDir() const {
