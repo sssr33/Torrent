@@ -6,12 +6,16 @@
 
 #include "PseudoConsoleTest.h"
 
+#include <memory>
 #include <algorithm>
 #include <iterator>
 #include <thread>
+#include <mutex>
+#include <atomic>
 #include <stdexcept>
 #include <iostream>
 #include <functional>
+#include <cassert>
 
 class TestConsoleHandler : public Terminal::ITerminalHandler
 {
@@ -102,6 +106,8 @@ void ForAllArchConfig(FnT fn) {
 	}
 }
 
+class ZLibBuild;
+
 class LibBuild {
 public:
 	LibBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath);
@@ -113,6 +119,9 @@ public:
 	const std::wstring& GetSrcPath() const;
 	const std::wstring& GetBuildBasePath() const;
 
+protected:
+	const ZLibBuild& FindZlibBuild(const std::vector<ZLibBuild>& zlibBuilds) const;
+
 private:
 	BuildArch arch;
 	BuildConfig config;
@@ -120,7 +129,8 @@ private:
 	std::wstring buildBasePath;
 };
 
-struct ZLibBuild : public LibBuild {
+class ZLibBuild : public LibBuild {
+public:
 	ZLibBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath);
 
 	void DoAllSteps() const;
@@ -153,19 +163,49 @@ private:
 	void Build() const;
 	void Install() const;
 
-	const ZLibBuild& FindZlibBuild(const std::vector<ZLibBuild>& zlibBuilds) const;
-
 	std::wstring GetBuildFolder() const;
 	std::wstring GetBuildPath() const;
 	std::wstring GetBaseCmdCommand() const;
 
-	std::wstring openSslSrcPath;
-	std::wstring buildPathBase;
-	BuildArch arch;
-	BuildConfig config;
 	const ZLibBuild& zlibBuild;
 	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs;
 };
+
+class BoostBuild : public LibBuild {
+public:
+	BoostBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath,
+		const std::vector<ZLibBuild>& zlibBuilds,
+		std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
+		std::shared_ptr<std::atomic<int>> inProgressBuildsCount);
+
+	void InitJobCount(size_t jobCount);
+
+	void DoAllSteps() const;
+
+private:
+	void Bootstrap() const;
+	void Configure() const;
+	void Build() const;
+	void BootstrapCleanUp() const;
+
+	std::wstring GetBuildFolder() const;
+	std::wstring GetBuildPath() const;
+	std::wstring GetBaseCmdCommand() const;
+	std::wstring GetVsVarsCommand() const;
+	std::wstring GetBoostBuildConfigName() const;
+	std::wstring GetBoostAddressModelNumber() const;
+	std::wstring GetBoostBuildDir() const;
+	std::wstring GetBoostStageDir() const;
+
+	const ZLibBuild& zlibBuild;
+	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs;
+	std::shared_ptr<std::atomic<int>> inProgressBuildsCount;
+	size_t jobCount = 8;
+
+	static std::once_flag bootstrapOnce;
+};
+
+std::once_flag BoostBuild::bootstrapOnce;
 
 void RunTest(std::wstring encoding);
 std::wstring ToWString(std::string_view str);
@@ -190,6 +230,7 @@ int main()
 	auto buildPath = solutionPath + buildLibFolder;
 	auto zlibSrcPath = solutionPath + L"zlib";
 	auto openSslSrcPath = solutionPath + L"openssl";
+	auto boostSrcPath = solutionPath + L"boost";
 	auto platformFactory = Platform::CreateWinPlatformFactory();
 
 #if BUILD_CLEAN
@@ -247,6 +288,43 @@ int main()
 #endif
 
 	std::cout << "OpenSSL build finished" << "\n\n";
+
+	std::cout << "Boost build start" << "\n";
+
+	std::vector<BoostBuild> boostBuilds;
+	auto boostInProgressBuildsCount = std::make_shared<std::atomic<int>>();
+
+	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
+		{
+			auto buildFolderFs = platformFactory->CreateFilesystem(buildPath);
+			boostBuilds.emplace_back(arch, config, boostSrcPath, buildPath, zlibBuilds, std::move(buildFolderFs), boostInProgressBuildsCount);
+		});
+
+	*boostInProgressBuildsCount = static_cast<int>(boostBuilds.size());
+
+#if BUILD_BOOST
+	// for now do not build all configs and architectures at once
+	// it has some build errors
+	// TODO check build errors in parallel build
+	/*size_t boostJobCount = std::thread::hardware_concurrency() / boostBuilds.size();
+
+	for (auto& build : boostBuilds) {
+		build.InitJobCount(boostJobCount);
+		tasks.push_back(std::thread(&BoostBuild::DoAllSteps, std::cref(build)));
+	}
+
+	JoinAll(tasks);*/
+
+	// but build serially with max threads for each build
+	size_t boostJobCount = std::thread::hardware_concurrency();
+
+	for (auto& build : boostBuilds) {
+		build.InitJobCount(boostJobCount);
+		build.DoAllSteps();
+	}
+#endif
+
+	std::cout << "Boost build finished" << "\n\n";
 
     /*if(false)
 	{
@@ -351,6 +429,22 @@ const std::wstring& LibBuild::GetSrcPath() const {
 
 const std::wstring& LibBuild::GetBuildBasePath() const {
 	return this->buildBasePath;
+}
+
+const ZLibBuild& LibBuild::FindZlibBuild(const std::vector<ZLibBuild>& zlibBuilds) const {
+	auto it = std::find_if(std::begin(zlibBuilds), std::end(zlibBuilds), [this](const ZLibBuild& build)
+		{
+			bool found = this->GetBuildArch() == build.GetBuildArch()
+				&& this->GetBuildConfig() == build.GetBuildConfig();
+
+			return found;
+		});
+
+	if (it == std::end(zlibBuilds)) {
+		throw std::runtime_error("OpenSSLBuild: ZLibBuild config/arch not found");
+	}
+
+	return *it;
 }
 
 ZLibBuild::ZLibBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath)
@@ -517,22 +611,6 @@ void OpenSSLBuild::Install() const {
 	Process::Utf8ConsoleProcess::Run(procParams, handler);
 }
 
-const ZLibBuild& OpenSSLBuild::FindZlibBuild(const std::vector<ZLibBuild>& zlibBuilds) const {
-	auto it = std::find_if(std::begin(zlibBuilds), std::end(zlibBuilds), [this](const ZLibBuild& build)
-		{
-			bool found = this->GetBuildArch() == build.GetBuildArch()
-				&& this->GetBuildConfig() == build.GetBuildConfig();
-
-			return found;
-		});
-
-	if (it == std::end(zlibBuilds)) {
-		throw std::runtime_error("OpenSSLBuild: ZLibBuild config/arch not found");
-	}
-
-	return *it;
-}
-
 std::wstring OpenSSLBuild::GetBuildFolder() const {
 	return L"openssl_" + ToDefaultString(this->GetBuildArch()) + L'_' + ToDefaultString(this->GetBuildConfig());
 }
@@ -567,6 +645,182 @@ std::wstring OpenSSLBuild::GetBaseCmdCommand() const {
 		;
 
 	return baseCommand;
+}
+
+BoostBuild::BoostBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath,
+	const std::vector<ZLibBuild>& zlibBuilds,
+	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
+	std::shared_ptr<std::atomic<int>> inProgressBuildsCount)
+	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath))
+	, zlibBuild(this->FindZlibBuild(zlibBuilds))
+	, buildFolderFs(std::move(buildFolderFs))
+	, inProgressBuildsCount(std::move(inProgressBuildsCount))
+{}
+
+void BoostBuild::InitJobCount(size_t jobCount) {
+	this->jobCount = std::clamp(jobCount, (size_t)1, (size_t)std::thread::hardware_concurrency());
+}
+
+void BoostBuild::DoAllSteps() const {
+	std::call_once(BoostBuild::bootstrapOnce, &BoostBuild::Bootstrap, this);
+	this->Configure();
+	this->Build();
+
+	if (this->inProgressBuildsCount) {
+		int inProgressBuildCurrentCount = --(*this->inProgressBuildsCount);
+		if (inProgressBuildCurrentCount == 0) {
+			// do it once after all builds finished
+			this->BootstrapCleanUp();
+		}
+	}
+	else {
+		// bootstrap cleanup skipped
+		assert(false);
+	}
+}
+
+void BoostBuild::Bootstrap() const {
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine =
+		std::wstring()
+		+ L"cmd.exe /C "
+		+ L"cd /d " + this->GetSrcPath()
+		+ L" && "
+		+ this->GetVsVarsCommand()
+		+ L" && "
+		+ L"bootstrap.bat"
+		;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+void BoostBuild::Configure() const {
+	this->buildFolderFs->CreateFolder(this->GetBuildFolder());
+}
+
+void BoostBuild::Build() const {
+	auto buildCmd =
+		std::wstring()
+		+ L"b2"
+		+ L" " + this->GetBoostBuildConfigName()
+		+ L" address-model=" + this->GetBoostAddressModelNumber()
+		+ L" threading=multi"
+		+ L" --toolset=msvc"
+		+ L" -j " + std::to_wstring(this->jobCount)
+		+ L" link=static"
+		+ L" runtime-link=shared"
+		+ L" --build-dir=" + this->GetBoostBuildDir()
+		+ L" --stagedir=" + this->GetBoostStageDir()
+		+ L" -sZLIB_INCLUDE=" + this->zlibBuild.GetIncludePath()
+		+ L" -sZLIB_LIBPATH=" + this->zlibBuild.GetStaticLibPath()
+		+ L" -sZLIB_SOURCE=" + this->zlibBuild.GetSrcPath()
+		;
+
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine =
+		std::wstring()
+		+ L"cmd.exe /C "
+		+ L"cd /d " + this->GetSrcPath()
+		+ L" && "
+		+ this->GetVsVarsCommand()
+		+ L" && "
+		+ buildCmd
+		;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+void BoostBuild::BootstrapCleanUp() const {
+	Process::ProcessTaskParameters procParams;
+
+	// clean src folder from bootstrap files
+	// build results are not in src folder but in this->GetBuildFolder()
+	procParams.commandLine =
+		std::wstring()
+		+ L"cmd.exe /C "
+		+ L"cd /d " + this->GetSrcPath()
+		+ L" && "
+		+ L"git clean -xfd"
+		+ L" && "
+		+ L"git submodule foreach --recursive git clean -xfd"
+		;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+std::wstring BoostBuild::GetBuildFolder() const {
+	return L"boost_" + ToDefaultString(this->GetBuildArch()) + L'_' + ToDefaultString(this->GetBuildConfig());
+}
+
+std::wstring BoostBuild::GetBuildPath() const {
+	return Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder());
+}
+
+std::wstring BoostBuild::GetBaseCmdCommand() const {
+	// commands:
+	// 1. cd to build folder
+	// 2. apply VC environment
+	auto baseCommand =
+		std::wstring()
+		+ L"cmd.exe /C "
+		+ L"cd /d " + this->GetBuildPath()
+		+ L" && "
+		+ this->GetVsVarsCommand();
+		;
+
+	return baseCommand;
+}
+
+std::wstring BoostBuild::GetVsVarsCommand() const {
+	const wchar_t* vcvarsallArch = nullptr;
+
+	switch (this->GetBuildArch()) {
+	case BuildArch::Win32:
+		vcvarsallArch = L"x86";
+		break;
+	case BuildArch::x64:
+		vcvarsallArch = L"x64";
+		break;
+	default:
+		throw std::runtime_error("BoostBuild::Configure: bad arch");
+	}
+
+	return Quote(LR"(C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat)") + L" " + vcvarsallArch;
+}
+
+std::wstring BoostBuild::GetBoostBuildConfigName() const {
+	switch (this->GetBuildConfig()) {
+	case BuildConfig::Debug:
+		return L"debug";
+	case BuildConfig::Release:
+		return L"release";
+	default:
+		throw std::runtime_error("BoostBuild::Configure: bad ConfigName");
+	}
+}
+
+std::wstring BoostBuild::GetBoostAddressModelNumber() const {
+	switch (this->GetBuildArch()) {
+	case BuildArch::Win32:
+		return L"32";
+	case BuildArch::x64:
+		return L"64";
+	default:
+		throw std::runtime_error("BoostBuild::Configure: bad arch");
+	}
+}
+
+std::wstring BoostBuild::GetBoostBuildDir() const {
+	return Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/build");
+}
+
+std::wstring BoostBuild::GetBoostStageDir() const {
+	return Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/stage");
 }
 
 // https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
