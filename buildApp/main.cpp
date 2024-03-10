@@ -110,8 +110,17 @@ class ZLibBuild;
 
 class LibBuild {
 public:
-	LibBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath);
+	LibBuild(
+		BuildArch arch,
+		BuildConfig config,
+		std::wstring srcPath,
+		std::wstring buildBasePath,
+		std::unique_ptr<Filesystem::IFilesystem> buildFolderFs);
+
+	LibBuild(LibBuild&& other) = default;
 	virtual ~LibBuild() = default;
+
+	LibBuild& operator=(LibBuild&& other) = default;
 
 	BuildArch GetBuildArch() const;
 	BuildConfig GetBuildConfig() const;
@@ -140,6 +149,7 @@ protected:
 	}
 
 	size_t jobCount = std::thread::hardware_concurrency();
+	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs;
 
 private:
 	BuildArch arch;
@@ -150,7 +160,12 @@ private:
 
 class ZLibBuild : public LibBuild {
 public:
-	ZLibBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath);
+	ZLibBuild(
+		BuildArch arch,
+		BuildConfig config,
+		std::wstring srcPath,
+		std::wstring buildBasePath,
+		std::unique_ptr<Filesystem::IFilesystem> buildFolderFs);
 
 	void DoAllSteps() const;
 
@@ -161,7 +176,10 @@ private:
 	void Generate() const;
 	void Build() const;
 	void Install() const;
+	void Clean() const;
 
+	std::wstring GetBuildFolder() const;
+	std::wstring GetBuildLocalFolder() const;
 	std::wstring GetBuildPath() const;
 	std::wstring GetInstallPath() const;
 
@@ -171,9 +189,13 @@ private:
 
 class OpenSSLBuild : public LibBuild {
 public:
-	OpenSSLBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath,
-		const std::vector<ZLibBuild>& zlibBuilds,
-		std::unique_ptr<Filesystem::IFilesystem> buildFolderFs);
+	OpenSSLBuild(
+		BuildArch arch,
+		BuildConfig config,
+		std::wstring srcPath,
+		std::wstring buildBasePath,
+		std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
+		const std::vector<ZLibBuild>& zlibBuilds);
 
 	void DoAllSteps() const;
 
@@ -204,14 +226,17 @@ private:
 	std::wstring GetBaseCmdCommand() const;
 
 	const ZLibBuild& zlibBuild;
-	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs;
 };
 
 class BoostBuild : public LibBuild {
 public:
-	BoostBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath,
-		const std::vector<ZLibBuild>& zlibBuilds,
+	BoostBuild(
+		BuildArch arch,
+		BuildConfig config,
+		std::wstring srcPath,
+		std::wstring buildBasePath,
 		std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
+		const std::vector<ZLibBuild>& zlibBuilds,
 		std::shared_ptr<std::atomic<int>> inProgressBuildsCount);
 
 	void DoAllSteps() const;
@@ -253,7 +278,12 @@ std::once_flag BoostBuild::bootstrapOnce;
 
 class LibtorrentBuild : public LibBuild {
 public:
-	LibtorrentBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath,
+	LibtorrentBuild(
+		BuildArch arch,
+		BuildConfig config,
+		std::wstring srcPath,
+		std::wstring buildBasePath,
+		std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
 		const std::vector<OpenSSLBuild>& opensslBuilds,
 		const std::vector<BoostBuild>& boostBuild
 	);
@@ -264,8 +294,10 @@ private:
 	void Generate() const;
 	void Build() const;
 	void Install() const;
+	void Clean() const;
 
 	std::wstring GetBuildFolder() const;
+	std::wstring GetBuildLocalFolder() const;
 	std::wstring GetBuildPath() const;
 	std::wstring GetInstallPath() const;
 
@@ -324,7 +356,8 @@ int main()
 
 	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
 		{
-			zlibBuilds.emplace_back(arch, config, zlibSrcPath, buildPath);
+			auto buildFolderFs = platformFactory->CreateFilesystem(buildPath);
+			zlibBuilds.emplace_back(arch, config, zlibSrcPath, buildPath, std::move(buildFolderFs));
 		});
 
 #if BUILD_ZLIB
@@ -351,7 +384,7 @@ int main()
 	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
 		{
 			auto buildFolderFs = platformFactory->CreateFilesystem(buildPath);
-			openSslBuilds.emplace_back(arch, config, openSslSrcPath, buildPath, zlibBuilds, std::move(buildFolderFs));
+			openSslBuilds.emplace_back(arch, config, openSslSrcPath, buildPath, std::move(buildFolderFs), zlibBuilds);
 		});
 
 #if BUILD_OPENSSL
@@ -372,7 +405,7 @@ int main()
 	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
 		{
 			auto buildFolderFs = platformFactory->CreateFilesystem(buildPath);
-			boostBuilds.emplace_back(arch, config, boostSrcPath, buildPath, zlibBuilds, std::move(buildFolderFs), boostInProgressBuildsCount);
+			boostBuilds.emplace_back(arch, config, boostSrcPath, buildPath, std::move(buildFolderFs), zlibBuilds, boostInProgressBuildsCount);
 		});
 
 	*boostInProgressBuildsCount = static_cast<int>(boostBuilds.size());
@@ -407,7 +440,8 @@ int main()
 
 	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
 		{
-			libtorrentBuilds.emplace_back(arch, config, libtorrentSrcPath, buildPath, openSslBuilds, boostBuilds);
+			auto buildFolderFs = platformFactory->CreateFilesystem(buildPath);
+			libtorrentBuilds.emplace_back(arch, config, libtorrentSrcPath, buildPath, std::move(buildFolderFs), openSslBuilds, boostBuilds);
 		});
 
 #if BUILD_LIBTORRENT
@@ -522,11 +556,17 @@ std::wstring ToDefaultString(BuildConfig config) {
 	return {};
 }
 
-LibBuild::LibBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath)
+LibBuild::LibBuild(
+	BuildArch arch,
+	BuildConfig config,
+	std::wstring srcPath,
+	std::wstring buildBasePath,
+	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs)
 	: arch(arch)
 	, config(config)
 	, srcPath(std::move(srcPath))
 	, buildBasePath(std::move(buildBasePath))
+	, buildFolderFs(std::move(buildFolderFs))
 {}
 
 BuildArch LibBuild::GetBuildArch() const {
@@ -549,14 +589,20 @@ void LibBuild::InitJobCount(size_t jobCount) {
 	this->jobCount = std::clamp(jobCount, (size_t)1, (size_t)std::thread::hardware_concurrency());
 }
 
-ZLibBuild::ZLibBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath)
-	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath))
+ZLibBuild::ZLibBuild(
+	BuildArch arch,
+	BuildConfig config,
+	std::wstring srcPath,
+	std::wstring buildBasePath,
+	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs)
+	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath), std::move(buildFolderFs))
 {}
 
 void ZLibBuild::DoAllSteps() const {
 	this->Generate();
 	this->Build();
 	this->Install();
+	this->Clean();
 }
 
 std::wstring ZLibBuild::GetStaticLibPath() const {
@@ -624,12 +670,24 @@ void ZLibBuild::Install() const {
 	Process::Utf8ConsoleProcess::Run(procParams, handler);
 }
 
+void ZLibBuild::Clean() const {
+	this->buildFolderFs->DeleteFolder(this->GetBuildLocalFolder());
+}
+
+std::wstring ZLibBuild::GetBuildFolder() const {
+	return L"zlib_" + ToDefaultString(this->GetBuildArch()) + L'_' + ToDefaultString(this->GetBuildConfig());
+}
+
+std::wstring ZLibBuild::GetBuildLocalFolder() const {
+	return this->GetBuildFolder() + L"/build";
+}
+
 std::wstring ZLibBuild::GetBuildPath() const {
-	return Quote(std::wstring(this->GetBuildBasePath()) + L"/zlib_" + this->GetArchPathStr() + L'_' + this->GetSolutionConfigStr());
+	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildLocalFolder());
 }
 
 std::wstring ZLibBuild::GetInstallPath() const {
-	return Quote(std::wstring(this->GetBuildBasePath()) + L"/zlib_" + this->GetArchPathStr() + L'_' + this->GetSolutionConfigStr()) + L"/install";
+	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildFolder() + L"/install");
 }
 
 std::wstring ZLibBuild::GetArchPathStr() const {
@@ -640,12 +698,15 @@ std::wstring ZLibBuild::GetSolutionConfigStr() const {
 	return ToDefaultString(this->GetBuildConfig());
 }
 
-OpenSSLBuild::OpenSSLBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath,
-	const std::vector<ZLibBuild>& zlibBuilds,
-	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs)
-	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath))
+OpenSSLBuild::OpenSSLBuild(
+	BuildArch arch,
+	BuildConfig config,
+	std::wstring srcPath,
+	std::wstring buildBasePath,
+	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
+	const std::vector<ZLibBuild>& zlibBuilds)
+	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath), std::move(buildFolderFs))
 	, zlibBuild(this->FindLibBuild(zlibBuilds))
-	, buildFolderFs(std::move(buildFolderFs))
 {}
 
 void OpenSSLBuild::DoAllSteps() const {
@@ -733,7 +794,7 @@ void OpenSSLBuild::Configure() const {
 		throw std::runtime_error("OpenSSLBuild::Configure: bad config");
 	}
 
-	auto opensslDir = Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/install/dir");
+	auto opensslDir = Quote(this->GetBuildBasePath() + L"/" + this->GetBuildFolder() + L"/install/dir");
 	auto opensslPrefix = Quote(this->GetBuildPrefixPath());
 	auto zlibIncludePath = this->zlibBuild.GetIncludePath();
 	auto zlibLibPath = this->zlibBuild.GetStaticLibPath();
@@ -848,13 +909,16 @@ std::wstring OpenSSLBuild::GetBaseCmdCommand() const {
 	return baseCommand;
 }
 
-BoostBuild::BoostBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath,
-	const std::vector<ZLibBuild>& zlibBuilds,
+BoostBuild::BoostBuild(
+	BuildArch arch,
+	BuildConfig config,
+	std::wstring srcPath,
+	std::wstring buildBasePath,
 	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
+	const std::vector<ZLibBuild>& zlibBuilds,
 	std::shared_ptr<std::atomic<int>> inProgressBuildsCount)
-	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath))
+	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath), std::move(buildFolderFs))
 	, zlibBuild(this->FindLibBuild(zlibBuilds))
-	, buildFolderFs(std::move(buildFolderFs))
 	, inProgressBuildsCount(std::move(inProgressBuildsCount))
 {}
 
@@ -1158,17 +1222,22 @@ std::wstring BoostBuild::GetBoostPrefixDir(BuildConfig config, bool quote) const
 }
 
 std::wstring BoostBuild::GetBoostBuildDir() const {
-	return Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/build");
+	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildFolder() + L"/build");
 }
 
 std::wstring BoostBuild::GetBoostStageDir() const {
-	return Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/stage");
+	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildFolder() + L"/stage");
 }
 
-LibtorrentBuild::LibtorrentBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath,
+LibtorrentBuild::LibtorrentBuild(
+	BuildArch arch,
+	BuildConfig config,
+	std::wstring srcPath,
+	std::wstring buildBasePath,
+	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
 	const std::vector<OpenSSLBuild>& opensslBuilds,
 	const std::vector<BoostBuild>& boostBuild)
-	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath))
+	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath), std::move(buildFolderFs))
 	, opensslBuild(this->FindLibBuild(opensslBuilds))
 	, boostBuild(this->FindLibBuild(boostBuild))
 {}
@@ -1177,6 +1246,7 @@ void LibtorrentBuild::DoAllSteps() const {
 	this->Generate();
 	this->Build();
 	this->Install();
+	this->Clean();
 }
 
 void LibtorrentBuild::Generate() const {
@@ -1260,12 +1330,20 @@ void LibtorrentBuild::Install() const {
 	Process::Utf8ConsoleProcess::Run(procParams, handler);
 }
 
+void LibtorrentBuild::Clean() const {
+	this->buildFolderFs->DeleteFolder(this->GetBuildLocalFolder());
+}
+
 std::wstring LibtorrentBuild::GetBuildFolder() const {
 	return L"libtorrent_" + ToDefaultString(this->GetBuildArch()) + L'_' + ToDefaultString(this->GetBuildConfig());
 }
 
+std::wstring LibtorrentBuild::GetBuildLocalFolder() const {
+	return this->GetBuildFolder() + L"/build";
+}
+
 std::wstring LibtorrentBuild::GetBuildPath() const {
-	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildFolder());
+	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildLocalFolder());
 }
 
 std::wstring LibtorrentBuild::GetInstallPath() const {
