@@ -119,8 +119,27 @@ public:
 	const std::wstring& GetSrcPath() const;
 	const std::wstring& GetBuildBasePath() const;
 
+	void InitJobCount(size_t jobCount);
+
 protected:
-	const ZLibBuild& FindZlibBuild(const std::vector<ZLibBuild>& zlibBuilds) const;
+	template<class LibT>
+	const LibT& FindLibBuild(const std::vector<LibT>& libBuilds) const {
+		auto it = std::find_if(std::begin(libBuilds), std::end(libBuilds), [this](const LibT& build)
+			{
+				bool found = this->GetBuildArch() == build.GetBuildArch()
+					&& this->GetBuildConfig() == build.GetBuildConfig();
+
+				return found;
+			});
+
+		if (it == std::end(libBuilds)) {
+			throw std::runtime_error("LibBuild: other LibBuild config/arch not found");
+		}
+
+		return *it;
+	}
+
+	size_t jobCount = std::thread::hardware_concurrency();
 
 private:
 	BuildArch arch;
@@ -158,13 +177,29 @@ public:
 
 	void DoAllSteps() const;
 
+	std::wstring GetInstalIncludeDir() const;
+	std::wstring GetInstalApplinkSource() const;
+
+	// https://wiki.openssl.org/index.php/Compilation_and_Installation
+	// The libcrypto and ssl libraries are still named libeay32.lib and ssleay32.lib
+	// libcrypto == libeay32.lib
+	// ssl == ssleay32.lib
+	std::wstring GetInstalLibEayLib(BuildConfig config) const;
+	std::wstring GetInstalLibEayDll(BuildConfig config) const;
+	std::wstring GetInstalSslEayLib(BuildConfig config) const;
+	std::wstring GetInstalSslEayDll(BuildConfig config) const;
+
 private:
 	void Configure() const;
 	void Build() const;
 	void Install() const;
 
 	std::wstring GetBuildFolder() const;
+	std::wstring GetBuildFolder(BuildConfig config) const;
 	std::wstring GetBuildPath() const;
+	std::wstring GetBuildPath(BuildConfig config, bool quote) const;
+	std::wstring GetBuildPrefixPath() const;
+	std::wstring GetBuildPrefixPath(BuildConfig config) const;
 	std::wstring GetBaseCmdCommand() const;
 
 	const ZLibBuild& zlibBuild;
@@ -178,9 +213,11 @@ public:
 		std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
 		std::shared_ptr<std::atomic<int>> inProgressBuildsCount);
 
-	void InitJobCount(size_t jobCount);
-
 	void DoAllSteps() const;
+
+	std::wstring GetInstalIncludeDir() const;
+	std::wstring GetInstalLibDir(BuildConfig config) const;
+	std::wstring GetInstalLibPath(BuildConfig config, const std::wstring& boostLibName) const;
 
 private:
 	void Bootstrap() const;
@@ -190,33 +227,63 @@ private:
 	void BootstrapCleanUp() const;
 
 	std::wstring GetBuildFolder() const;
+	std::wstring GetBuildFolder(BuildConfig config) const;
 	std::wstring GetBuildPath() const;
 	std::wstring GetBaseCmdCommand() const;
 	std::wstring GetVsVarsCommand() const;
 	std::wstring GetBoostBuildConfigName() const;
 	std::wstring GetBoostAddressModelNumber() const;
 	std::wstring GetBoostPrefixDir() const;
+	std::wstring GetBoostPrefixDir(BuildConfig config, bool quote) const;
 	std::wstring GetBoostBuildDir() const;
 	std::wstring GetBoostStageDir() const;
+
+	static constexpr std::wstring_view BoostVer = L"1_72";
 
 	const ZLibBuild& zlibBuild;
 	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs;
 	std::shared_ptr<std::atomic<int>> inProgressBuildsCount;
-	size_t jobCount = 8;
 
 	static std::once_flag bootstrapOnce;
 };
 
 std::once_flag BoostBuild::bootstrapOnce;
 
+class LibtorrentBuild : public LibBuild {
+public:
+	LibtorrentBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath,
+		const std::vector<OpenSSLBuild>& opensslBuilds,
+		const std::vector<BoostBuild>& boostBuild
+	);
+
+	void DoAllSteps() const;
+
+private:
+	void Generate() const;
+	void Build() const;
+	void Install() const;
+
+	std::wstring GetBuildFolder() const;
+	std::wstring GetBuildPath() const;
+	std::wstring GetInstallPath() const;
+
+	static std::wstring CmakeOpt_ON(const std::wstring& optName);
+	static std::wstring CmakeOpt_OFF(const std::wstring& optName);
+	static std::wstring CmakeOpt_Path(const std::wstring& optName, const std::wstring& path);
+
+	const OpenSSLBuild& opensslBuild;
+	const BoostBuild& boostBuild;
+};
+
 void RunTest(std::wstring encoding);
 std::wstring ToWString(std::string_view str);
 std::wstring Quote(const std::wstring& str);
+std::wstring ToForwardSlash(const std::wstring& str);
 void JoinAll(std::vector<std::thread>& tasks);
 
-#define BUILD_CLEAN 0
-#define BUILD_ZLIB 0
-#define BUILD_OPENSSL 0
+#define BUILD_CLEAN 1
+#define BUILD_ZLIB 1
+#define BUILD_OPENSSL 1
 #define BUILD_BOOST 1
 #define BUILD_LIBTORRENT 1
 
@@ -259,7 +326,10 @@ int main()
 		});
 
 #if BUILD_ZLIB
+	size_t zlibJobCount = std::thread::hardware_concurrency() / zlibBuilds.size();
+
 	for (auto& build : zlibBuilds) {
+		build.InitJobCount(zlibJobCount);
 		tasks.push_back(std::thread(&ZLibBuild::DoAllSteps, std::cref(build)));
 	}
 
@@ -270,7 +340,7 @@ int main()
 	zlibFileSystem->DeleteFile(L"zconfTmp.h");
 	zlibFileSystem->DeleteFile(L"zconf.h.included");
 
-	std::cout << "Zlib build finished" << "\n\n";
+	std::cout << "Zlib build finish" << "\n\n";
 
 	std::cout << "OpenSSL build start" << "\n";
 
@@ -290,7 +360,7 @@ int main()
 	JoinAll(tasks);
 #endif
 
-	std::cout << "OpenSSL build finished" << "\n\n";
+	std::cout << "OpenSSL build finish" << "\n\n";
 
 	std::cout << "Boost build start" << "\n";
 
@@ -327,7 +397,29 @@ int main()
 	}
 #endif
 
-	std::cout << "Boost build finished" << "\n\n";
+	std::cout << "Boost build finish" << "\n\n";
+
+	std::cout << "Libtorrent build start" << "\n";
+
+	std::vector<LibtorrentBuild> libtorrentBuilds;
+
+	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
+		{
+			libtorrentBuilds.emplace_back(arch, config, libtorrentSrcPath, buildPath, openSslBuilds, boostBuilds);
+		});
+
+#if BUILD_LIBTORRENT
+	size_t libtorrentJobCount = std::thread::hardware_concurrency() / libtorrentBuilds.size();
+
+	for (auto& build : libtorrentBuilds) {
+		build.InitJobCount(libtorrentJobCount);
+		tasks.push_back(std::thread(&LibtorrentBuild::DoAllSteps, std::cref(build)));
+	}
+
+	JoinAll(tasks);
+#endif
+
+	std::cout << "Libtorrent build finish" << "\n\n";
 
     /*if(false)
 	{
@@ -379,6 +471,23 @@ std::wstring ToWString(std::string_view str) {
 
 std::wstring Quote(const std::wstring& str) {
 	return L'\"' + str + L'\"';
+}
+
+std::wstring ToForwardSlash(const std::wstring& str) {
+	std::wstring res;
+
+	res.reserve(str.size());
+
+	for (auto ch : str) {
+		if (ch == L'\\') {
+			res.push_back(L'/');
+		}
+		else {
+			res.push_back(ch);
+		}
+	}
+
+	return res;
 }
 
 void JoinAll(std::vector<std::thread>& tasks) {
@@ -434,20 +543,8 @@ const std::wstring& LibBuild::GetBuildBasePath() const {
 	return this->buildBasePath;
 }
 
-const ZLibBuild& LibBuild::FindZlibBuild(const std::vector<ZLibBuild>& zlibBuilds) const {
-	auto it = std::find_if(std::begin(zlibBuilds), std::end(zlibBuilds), [this](const ZLibBuild& build)
-		{
-			bool found = this->GetBuildArch() == build.GetBuildArch()
-				&& this->GetBuildConfig() == build.GetBuildConfig();
-
-			return found;
-		});
-
-	if (it == std::end(zlibBuilds)) {
-		throw std::runtime_error("OpenSSLBuild: ZLibBuild config/arch not found");
-	}
-
-	return *it;
+void LibBuild::InitJobCount(size_t jobCount) {
+	this->jobCount = std::clamp(jobCount, (size_t)1, (size_t)std::thread::hardware_concurrency());
 }
 
 ZLibBuild::ZLibBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath)
@@ -496,11 +593,23 @@ void ZLibBuild::Generate() const {
 void ZLibBuild::Build() const {
 	Process::ProcessTaskParameters procParams;
 
-	procParams.commandLine = L"cmake --build " + this->GetBuildPath() + L" --target \"zlib\" " + L" --config " + this->GetSolutionConfigStr();
+	procParams.commandLine =
+		std::wstring()
+		+ L"cmake"
+		+ L" --build " + this->GetBuildPath()
+		//+ L" --parallel " + std::to_wstring(this->jobCount) // TODO check how to set job count, for now it limits to 1 job
+		+ L" --target \"zlib\""
+		+ L" --config " + this->GetSolutionConfigStr();
 	auto handler = std::make_shared<TestConsoleHandler>();
 	Process::Utf8ConsoleProcess::Run(procParams, handler);
 
-	procParams.commandLine = L"cmake --build " + this->GetBuildPath() + L" --target \"zlibstatic\" " + L" --config " + this->GetSolutionConfigStr();
+	procParams.commandLine =
+		std::wstring()
+		+ L"cmake"
+		+ L" --build " + this->GetBuildPath()
+		//+ L" --parallel " + std::to_wstring(this->jobCount) // TODO check how to set job count, for now it limits to 1 job
+		+ L" --target \"zlibstatic\""
+		+ L" --config " + this->GetSolutionConfigStr();
 	handler = std::make_shared<TestConsoleHandler>();
 	Process::Utf8ConsoleProcess::Run(procParams, handler);
 }
@@ -533,7 +642,7 @@ OpenSSLBuild::OpenSSLBuild(BuildArch arch, BuildConfig config, std::wstring srcP
 	const std::vector<ZLibBuild>& zlibBuilds,
 	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs)
 	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath))
-	, zlibBuild(this->FindZlibBuild(zlibBuilds))
+	, zlibBuild(this->FindLibBuild(zlibBuilds))
 	, buildFolderFs(std::move(buildFolderFs))
 {}
 
@@ -541,6 +650,56 @@ void OpenSSLBuild::DoAllSteps() const {
 	this->Configure();
 	this->Build();
 	this->Install();
+}
+
+std::wstring OpenSSLBuild::GetInstalIncludeDir() const {
+	return this->GetBuildPrefixPath() + L"/include";
+}
+
+std::wstring OpenSSLBuild::GetInstalApplinkSource() const {
+	return this->GetBuildPrefixPath() + L"/include/openssl/applink.c";
+}
+
+std::wstring OpenSSLBuild::GetInstalLibEayLib(BuildConfig config) const {
+	return this->GetBuildPrefixPath(config) + L"/lib/libcrypto.lib";
+}
+
+std::wstring OpenSSLBuild::GetInstalLibEayDll(BuildConfig config) const {
+	std::wstring dllName;
+
+	switch (this->GetBuildArch()) {
+	case BuildArch::Win32:
+		dllName = L"libcrypto-1_1.dll";
+		break;
+	case BuildArch::x64:
+		dllName = L"libcrypto-1_1-x64.dll";
+		break;
+	default:
+		throw std::runtime_error("GetInstalLibEayDll: bad arch");
+	}
+
+	return this->GetBuildPrefixPath(config) + L"/bin/" + dllName;
+}
+
+std::wstring OpenSSLBuild::GetInstalSslEayLib(BuildConfig config) const {
+	return this->GetBuildPrefixPath(config) + L"/lib/libssl.lib";
+}
+
+std::wstring OpenSSLBuild::GetInstalSslEayDll(BuildConfig config) const {
+	std::wstring dllName;
+
+	switch (this->GetBuildArch()) {
+	case BuildArch::Win32:
+		dllName = L"libssl-1_1.dll";
+		break;
+	case BuildArch::x64:
+		dllName = L"libssl-1_1-x64.dll";
+		break;
+	default:
+		throw std::runtime_error("GetInstalSslEayDll: bad arch");
+	}
+
+	return this->GetBuildPrefixPath(config) + L"/bin/" + dllName;
 }
 
 void OpenSSLBuild::Configure() const {
@@ -572,7 +731,7 @@ void OpenSSLBuild::Configure() const {
 	}
 
 	auto opensslDir = Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/install/dir");
-	auto opensslPrefix = Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/install/prefix");
+	auto opensslPrefix = Quote(this->GetBuildPrefixPath());
 	auto zlibIncludePath = this->zlibBuild.GetIncludePath();
 	auto zlibLibPath = this->zlibBuild.GetStaticLibPath();
 
@@ -615,11 +774,34 @@ void OpenSSLBuild::Install() const {
 }
 
 std::wstring OpenSSLBuild::GetBuildFolder() const {
-	return L"openssl_" + ToDefaultString(this->GetBuildArch()) + L'_' + ToDefaultString(this->GetBuildConfig());
+	return this->GetBuildFolder(this->GetBuildConfig());
+}
+
+std::wstring OpenSSLBuild::GetBuildFolder(BuildConfig config) const {
+	return L"openssl_" + ToDefaultString(this->GetBuildArch()) + L'_' + ToDefaultString(config);
 }
 
 std::wstring OpenSSLBuild::GetBuildPath() const {
-	return Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder());
+	return this->GetBuildPath(this->GetBuildConfig(), true);
+}
+
+std::wstring OpenSSLBuild::GetBuildPath(BuildConfig config, bool quote) const {
+	auto path = this->GetBuildBasePath() + L"/" + this->GetBuildFolder(config);
+
+	if (quote) {
+		return Quote(path);
+	}
+
+	return path;
+}
+
+std::wstring OpenSSLBuild::GetBuildPrefixPath() const {
+	return this->GetBuildPrefixPath(this->GetBuildConfig());
+}
+
+std::wstring OpenSSLBuild::GetBuildPrefixPath(BuildConfig config) const {
+	auto opensslPrefix = this->GetBuildPath(config, false) + L"/install/prefix";
+	return opensslPrefix;
 }
 
 std::wstring OpenSSLBuild::GetBaseCmdCommand() const {
@@ -655,14 +837,10 @@ BoostBuild::BoostBuild(BuildArch arch, BuildConfig config, std::wstring srcPath,
 	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
 	std::shared_ptr<std::atomic<int>> inProgressBuildsCount)
 	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath))
-	, zlibBuild(this->FindZlibBuild(zlibBuilds))
+	, zlibBuild(this->FindLibBuild(zlibBuilds))
 	, buildFolderFs(std::move(buildFolderFs))
 	, inProgressBuildsCount(std::move(inProgressBuildsCount))
 {}
-
-void BoostBuild::InitJobCount(size_t jobCount) {
-	this->jobCount = std::clamp(jobCount, (size_t)1, (size_t)std::thread::hardware_concurrency());
-}
 
 void BoostBuild::DoAllSteps() const {
 	std::call_once(BoostBuild::bootstrapOnce, &BoostBuild::Bootstrap, this);
@@ -682,6 +860,57 @@ void BoostBuild::DoAllSteps() const {
 		// bootstrap cleanup skipped
 		assert(false);
 	}
+}
+
+std::wstring BoostBuild::GetInstalIncludeDir() const {
+	return this->GetBoostPrefixDir(this->GetBuildConfig(), false) + L"/include/boost-" + std::wstring(BoostBuild::BoostVer);
+}
+
+std::wstring BoostBuild::GetInstalLibDir(BuildConfig config) const {
+	return this->GetBoostPrefixDir(config, false) + L"/lib";
+}
+
+std::wstring BoostBuild::GetInstalLibPath(BuildConfig config, const std::wstring& boostLibName) const {
+	std::wstring libConfig;
+
+	switch (config) {
+	case BuildConfig::Debug:
+		libConfig = L"-gd";
+		break;
+	case BuildConfig::Release:
+		libConfig = L"";
+		break;
+	default:
+		assert(false);
+		throw std::runtime_error("GetInstalLibPath bad config");
+	}
+
+	std::wstring libArch;
+
+	switch (this->GetBuildArch()) {
+	case BuildArch::Win32:
+		libArch = L"-x32";
+		break;
+	case BuildArch::x64:
+		libArch = L"-x64";
+		break;
+	default:
+		assert(false);
+		throw std::runtime_error("GetInstalLibPath bad arch");
+	}
+
+	std::wstring libPath =
+		this->GetInstalLibDir(config)
+		+ L"/"
+		+ L"libboost_"
+		+ boostLibName
+		+ L"-vc142-mt"
+		+ libConfig
+		+ libArch
+		+ L"-" + std::wstring(BoostBuild::BoostVer)
+		+ L".lib";
+
+	return libPath;
 }
 
 void BoostBuild::Bootstrap() const {
@@ -796,7 +1025,11 @@ void BoostBuild::BootstrapCleanUp() const {
 }
 
 std::wstring BoostBuild::GetBuildFolder() const {
-	return L"boost_" + ToDefaultString(this->GetBuildArch()) + L'_' + ToDefaultString(this->GetBuildConfig());
+	return this->GetBuildFolder(this->GetBuildConfig());
+}
+
+std::wstring BoostBuild::GetBuildFolder(BuildConfig config) const {
+	return L"boost_" + ToDefaultString(this->GetBuildArch()) + L'_' + ToDefaultString(config);
 }
 
 std::wstring BoostBuild::GetBuildPath() const {
@@ -858,7 +1091,17 @@ std::wstring BoostBuild::GetBoostAddressModelNumber() const {
 }
 
 std::wstring BoostBuild::GetBoostPrefixDir() const {
-	return Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/prefix");
+	return this->GetBoostPrefixDir(this->GetBuildConfig(), true);
+}
+
+std::wstring BoostBuild::GetBoostPrefixDir(BuildConfig config, bool quote) const {
+	auto dir = this->GetBuildBasePath() + L"/" + this->GetBuildFolder(config) + L"/prefix";
+
+	if (quote) {
+		return Quote(dir);
+	}
+
+	return dir;
 }
 
 std::wstring BoostBuild::GetBoostBuildDir() const {
@@ -867,6 +1110,124 @@ std::wstring BoostBuild::GetBoostBuildDir() const {
 
 std::wstring BoostBuild::GetBoostStageDir() const {
 	return Quote(std::wstring(this->GetBuildBasePath()) + L"/" + this->GetBuildFolder() + L"/stage");
+}
+
+LibtorrentBuild::LibtorrentBuild(BuildArch arch, BuildConfig config, std::wstring srcPath, std::wstring buildBasePath,
+	const std::vector<OpenSSLBuild>& opensslBuilds,
+	const std::vector<BoostBuild>& boostBuild)
+	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath))
+	, opensslBuild(this->FindLibBuild(opensslBuilds))
+	, boostBuild(this->FindLibBuild(boostBuild))
+{}
+
+void LibtorrentBuild::DoAllSteps() const {
+	this->Generate();
+	this->Build();
+	this->Install();
+}
+
+void LibtorrentBuild::Generate() const {
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine =
+		std::wstring()
+		+ L"cmake -G \"Visual Studio 16 2019\""
+		+ L" -A " + ToDefaultString(this->GetBuildArch())
+		+ L" -S " + Quote(this->GetSrcPath())
+		+ L" -B " + this->GetBuildPath()
+		+ L" --install-prefix " + this->GetInstallPath()
+		+ CmakeOpt_ON(L"BUILD_SHARED_LIBS")
+		+ CmakeOpt_OFF(L"build_examples")
+		+ CmakeOpt_OFF(L"build_tests")
+		+ CmakeOpt_ON(L"deprecated-functions")
+		+ CmakeOpt_OFF(L"developer-options")
+		+ CmakeOpt_ON(L"dht")
+		+ CmakeOpt_ON(L"encryption")
+		+ CmakeOpt_ON(L"exceptions")
+		+ CmakeOpt_ON(L"extensions")
+		+ CmakeOpt_ON(L"i2p")
+		+ CmakeOpt_ON(L"logging")
+		+ CmakeOpt_ON(L"mutable-torrents")
+		+ CmakeOpt_OFF(L"python-bindings")
+		+ CmakeOpt_OFF(L"static_runtime")
+		+ CmakeOpt_Path(L"Boost_DIR", L"")
+		+ CmakeOpt_Path(L"Boost_INCLUDE_DIR", this->boostBuild.GetInstalIncludeDir())
+		+ CmakeOpt_Path(L"Boost_LIBRARY_DIR_DEBUG", this->boostBuild.GetInstalLibDir(BuildConfig::Debug))
+		+ CmakeOpt_Path(L"Boost_LIBRARY_DIR_RELEASE", this->boostBuild.GetInstalLibDir(BuildConfig::Release))
+		+ CmakeOpt_Path(L"Boost_SYSTEM_LIBRARY_DEBUG", this->boostBuild.GetInstalLibPath(BuildConfig::Debug, L"system"))
+		+ CmakeOpt_Path(L"Boost_SYSTEM_LIBRARY_RELEASE", this->boostBuild.GetInstalLibPath(BuildConfig::Release, L"system"))
+		+ CmakeOpt_Path(L"Iconv_INCLUDE_DIR", L"")
+		+ CmakeOpt_Path(L"Iconv_LIBRARY", L"")
+		+ CmakeOpt_Path(L"LibGcrypt_INCLUDE_DIRS", L"")
+		+ CmakeOpt_Path(L"LibGcrypt_LIBRARIES_DEBUG", L"")
+		+ CmakeOpt_Path(L"OPENSSL_INCLUDE_DIR", this->opensslBuild.GetInstalIncludeDir())
+		+ CmakeOpt_Path(L"OPENSSL_APPLINK_SOURCE", this->opensslBuild.GetInstalApplinkSource())
+		+ CmakeOpt_Path(L"LIB_EAY_DEBUG", this->opensslBuild.GetInstalLibEayLib(BuildConfig::Debug))
+		+ CmakeOpt_Path(L"LIB_EAY_RELEASE", this->opensslBuild.GetInstalLibEayLib(BuildConfig::Release))
+		+ CmakeOpt_Path(L"LIB_EAY_LIBRARY_DEBUG", this->opensslBuild.GetInstalLibEayDll(BuildConfig::Debug))
+		+ CmakeOpt_Path(L"LIB_EAY_LIBRARY_RELEASE", this->opensslBuild.GetInstalLibEayDll(BuildConfig::Release))
+		+ CmakeOpt_Path(L"SSL_EAY_DEBUG", this->opensslBuild.GetInstalSslEayLib(BuildConfig::Debug))
+		+ CmakeOpt_Path(L"SSL_EAY_RELEASE", this->opensslBuild.GetInstalSslEayLib(BuildConfig::Release))
+		+ CmakeOpt_Path(L"SSL_EAY_LIBRARY_DEBUG", this->opensslBuild.GetInstalSslEayDll(BuildConfig::Debug))
+		+ CmakeOpt_Path(L"SSL_EAY_LIBRARY_RELEASE", this->opensslBuild.GetInstalSslEayDll(BuildConfig::Release))
+		;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+void LibtorrentBuild::Build() const {
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine =
+		std::wstring()
+		+ L"cmake"
+		+ L" --build " + this->GetBuildPath()
+		//+ L" --parallel " + std::to_wstring(this->jobCount) // TODO check how to set job count, for now it limits to 1 job
+		+ L" --target \"torrent-rasterbar\""
+		+ L" --config " + ToDefaultString(this->GetBuildConfig())
+		;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+void LibtorrentBuild::Install() const {
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine =
+		std::wstring()
+		+ L"cmake"
+		+ L" --install " + this->GetBuildPath()
+		+ L" --config " + ToDefaultString(this->GetBuildConfig())
+		;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+std::wstring LibtorrentBuild::GetBuildFolder() const {
+	return L"libtorrent_" + ToDefaultString(this->GetBuildArch()) + L'_' + ToDefaultString(this->GetBuildConfig());
+}
+
+std::wstring LibtorrentBuild::GetBuildPath() const {
+	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildFolder());
+}
+
+std::wstring LibtorrentBuild::GetInstallPath() const {
+	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildFolder() + L"/install");
+}
+
+std::wstring LibtorrentBuild::CmakeOpt_ON(const std::wstring& optName) {
+	return std::wstring() + L" " + L"-D" + optName + L"=" + L"ON";
+}
+
+std::wstring LibtorrentBuild::CmakeOpt_OFF(const std::wstring& optName) {
+	return std::wstring() + L" " + L"-D" + optName + L"=" + L"OFF";
+}
+
+std::wstring LibtorrentBuild::CmakeOpt_Path(const std::wstring& optName, const std::wstring& path) {
+	return std::wstring() + L" " + L"-D" + optName + L"=" + Quote(ToForwardSlash(path));
 }
 
 // https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
