@@ -187,6 +187,7 @@ private:
 	std::wstring GetSolutionConfigStr() const;
 };
 
+// TODO add clean step and folder struct as in cmake libs(build + install folder)
 class OpenSSLBuild : public LibBuild {
 public:
 	OpenSSLBuild(
@@ -228,6 +229,7 @@ private:
 	const ZLibBuild& zlibBuild;
 };
 
+// TODO add clean step and folder struct as in cmake libs(build + install folder)
 class BoostBuild : public LibBuild {
 public:
 	BoostBuild(
