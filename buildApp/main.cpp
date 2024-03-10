@@ -224,6 +224,7 @@ private:
 	void Configure() const;
 	void Build() const;
 	void Install() const;
+	void Clean() const;
 	void BootstrapCleanUp() const;
 
 	std::wstring GetBuildFolder() const;
@@ -238,7 +239,7 @@ private:
 	std::wstring GetBoostBuildDir() const;
 	std::wstring GetBoostStageDir() const;
 
-	static constexpr std::wstring_view BoostVer = L"1_72";
+	static constexpr std::wstring_view BoostVer = L"1_84";
 
 	const ZLibBuild& zlibBuild;
 	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs;
@@ -388,7 +389,7 @@ int main()
 
 	JoinAll(tasks);*/
 
-	// but build serially with max threads for each build
+	// build serially with max threads for each build
 	size_t boostJobCount = std::thread::hardware_concurrency();
 
 	for (auto& build : boostBuilds) {
@@ -401,6 +402,7 @@ int main()
 
 	std::cout << "Libtorrent build start" << "\n";
 
+#if BUILD_LIBTORRENT
 	std::vector<LibtorrentBuild> libtorrentBuilds;
 
 	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
@@ -408,7 +410,6 @@ int main()
 			libtorrentBuilds.emplace_back(arch, config, libtorrentSrcPath, buildPath, openSslBuilds, boostBuilds);
 		});
 
-#if BUILD_LIBTORRENT
 	size_t libtorrentJobCount = std::thread::hardware_concurrency() / libtorrentBuilds.size();
 
 	for (auto& build : libtorrentBuilds) {
@@ -848,6 +849,7 @@ void BoostBuild::DoAllSteps() const {
 	this->Configure();
 	this->Build();
 	this->Install();
+	this->Clean();
 
 	if (this->inProgressBuildsCount) {
 		int inProgressBuildCurrentCount = --(*this->inProgressBuildsCount);
@@ -987,6 +989,42 @@ void BoostBuild::Install() const {
 		+ L" -sZLIB_LIBPATH=" + this->zlibBuild.GetStaticLibPath()
 		+ L" -sZLIB_SOURCE=" + this->zlibBuild.GetSrcPath()
 		+ L" install"
+		;
+
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine =
+		std::wstring()
+		+ L"cmd.exe /C "
+		+ L"cd /d " + this->GetSrcPath()
+		+ L" && "
+		+ this->GetVsVarsCommand()
+		+ L" && "
+		+ installCmd
+		;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+void BoostBuild::Clean() const {
+	auto installCmd =
+		std::wstring()
+		+ L"b2"
+		+ L" " + this->GetBoostBuildConfigName()
+		+ L" address-model=" + this->GetBoostAddressModelNumber()
+		+ L" threading=multi"
+		+ L" --toolset=msvc"
+		+ L" -j " + std::to_wstring(this->jobCount)
+		+ L" link=static"
+		+ L" runtime-link=shared"
+		+ L" --prefix=" + this->GetBoostPrefixDir()
+		+ L" --build-dir=" + this->GetBoostBuildDir()
+		+ L" --stagedir=" + this->GetBoostStageDir()
+		+ L" -sZLIB_INCLUDE=" + this->zlibBuild.GetIncludePath()
+		+ L" -sZLIB_LIBPATH=" + this->zlibBuild.GetStaticLibPath()
+		+ L" -sZLIB_SOURCE=" + this->zlibBuild.GetSrcPath()
+		+ L" clean"
 		;
 
 	Process::ProcessTaskParameters procParams;
