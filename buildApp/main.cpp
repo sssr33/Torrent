@@ -193,6 +193,7 @@ private:
 	void Configure() const;
 	void Build() const;
 	void Install() const;
+	void Clean() const;
 
 	std::wstring GetBuildFolder() const;
 	std::wstring GetBuildFolder(BuildConfig config) const;
@@ -402,7 +403,6 @@ int main()
 
 	std::cout << "Libtorrent build start" << "\n";
 
-#if BUILD_LIBTORRENT
 	std::vector<LibtorrentBuild> libtorrentBuilds;
 
 	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
@@ -410,6 +410,7 @@ int main()
 			libtorrentBuilds.emplace_back(arch, config, libtorrentSrcPath, buildPath, openSslBuilds, boostBuilds);
 		});
 
+#if BUILD_LIBTORRENT
 	size_t libtorrentJobCount = std::thread::hardware_concurrency() / libtorrentBuilds.size();
 
 	for (auto& build : libtorrentBuilds) {
@@ -651,6 +652,7 @@ void OpenSSLBuild::DoAllSteps() const {
 	this->Configure();
 	this->Build();
 	this->Install();
+	this->Clean();
 }
 
 std::wstring OpenSSLBuild::GetInstalIncludeDir() const {
@@ -670,10 +672,10 @@ std::wstring OpenSSLBuild::GetInstalLibEayDll(BuildConfig config) const {
 
 	switch (this->GetBuildArch()) {
 	case BuildArch::Win32:
-		dllName = L"libcrypto-1_1.dll";
+		dllName = L"libcrypto-3.dll";
 		break;
 	case BuildArch::x64:
-		dllName = L"libcrypto-1_1-x64.dll";
+		dllName = L"libcrypto-3-x64.dll";
 		break;
 	default:
 		throw std::runtime_error("GetInstalLibEayDll: bad arch");
@@ -691,10 +693,10 @@ std::wstring OpenSSLBuild::GetInstalSslEayDll(BuildConfig config) const {
 
 	switch (this->GetBuildArch()) {
 	case BuildArch::Win32:
-		dllName = L"libssl-1_1.dll";
+		dllName = L"libssl-3.dll";
 		break;
 	case BuildArch::x64:
-		dllName = L"libssl-1_1-x64.dll";
+		dllName = L"libssl-3-x64.dll";
 		break;
 	default:
 		throw std::runtime_error("GetInstalSslEayDll: bad arch");
@@ -768,6 +770,19 @@ void OpenSSLBuild::Install() const {
 		this->GetBaseCmdCommand()
 		+ L" && "
 		+ L"nmake install"
+		;
+
+	auto handler = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+void OpenSSLBuild::Clean() const {
+	Process::ProcessTaskParameters procParams;
+
+	procParams.commandLine =
+		this->GetBaseCmdCommand()
+		+ L" && "
+		+ L"nmake clean"
 		;
 
 	auto handler = std::make_shared<TestConsoleHandler>();
