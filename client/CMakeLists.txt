@@ -29,6 +29,9 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT C
 
 if(MSVC)
  target_compile_options(Client PRIVATE "/MP")
+ # Enable updated __cplusplus macro
+ # https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
+ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
 endif()
 
 # GeneratedCMakeLists.txt contain vars with paths to includes, libs, dlls for 3rd party libs
