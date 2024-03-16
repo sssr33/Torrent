@@ -16,6 +16,9 @@
 #include <iostream>
 #include <functional>
 #include <cassert>
+#include <fstream>
+#include <map>
+#include <set>
 
 class TestConsoleHandler : public Terminal::ITerminalHandler
 {
@@ -106,6 +109,16 @@ void ForAllArchConfig(FnT fn) {
 	}
 }
 
+template<class FnT = std::function<void(BuildConfig)>>
+void ForAllConfig(FnT fn) {
+	for (auto config = static_cast<std::underlying_type_t<BuildConfig>>(BuildConfig::Unknown) + 1;
+		config < static_cast<std::underlying_type_t<BuildConfig>>(BuildConfig::Count);
+		++config)
+	{
+		fn(static_cast<BuildConfig>(config));
+	}
+}
+
 class ZLibBuild;
 
 class LibBuild {
@@ -130,13 +143,12 @@ public:
 
 	void InitJobCount(size_t jobCount);
 
-protected:
 	template<class LibT>
-	const LibT& FindLibBuild(const std::vector<LibT>& libBuilds) const {
-		auto it = std::find_if(std::begin(libBuilds), std::end(libBuilds), [this](const LibT& build)
+	static const LibT& FindLibBuild(const std::vector<LibT>& libBuilds, BuildArch arch, BuildConfig config) {
+		auto it = std::find_if(std::begin(libBuilds), std::end(libBuilds), [&](const LibT& build)
 			{
-				bool found = this->GetBuildArch() == build.GetBuildArch()
-					&& this->GetBuildConfig() == build.GetBuildConfig();
+				bool found = arch == build.GetBuildArch()
+					&& config == build.GetBuildConfig();
 
 				return found;
 			});
@@ -146,6 +158,12 @@ protected:
 		}
 
 		return *it;
+	}
+
+protected:
+	template<class LibT>
+	const LibT& FindLibBuild(const std::vector<LibT>& libBuilds) const {
+		return this->FindLibBuild(libBuilds, this->GetBuildArch(), this->GetBuildConfig());
 	}
 
 	size_t jobCount = std::thread::hardware_concurrency();
@@ -181,6 +199,7 @@ private:
 	std::wstring GetBuildFolder() const;
 	std::wstring GetBuildLocalFolder() const;
 	std::wstring GetBuildPath() const;
+	std::wstring GetInstallFolder() const;
 	std::wstring GetInstallPath() const;
 
 	std::wstring GetArchPathStr() const;
@@ -292,6 +311,10 @@ public:
 
 	void DoAllSteps() const;
 
+	std::wstring GetIncludePath() const;
+	std::wstring GetLibPath() const;
+	std::wstring GetDllPath() const;
+
 private:
 	void Generate() const;
 	void Build() const;
@@ -301,6 +324,7 @@ private:
 	std::wstring GetBuildFolder() const;
 	std::wstring GetBuildLocalFolder() const;
 	std::wstring GetBuildPath() const;
+	std::wstring GetInstallFolder() const;
 	std::wstring GetInstallPath() const;
 
 	static std::wstring CmakeOpt_ON(const std::wstring& optName);
@@ -322,6 +346,7 @@ void JoinAll(std::vector<std::thread>& tasks);
 #define BUILD_OPENSSL 1
 #define BUILD_BOOST 1
 #define BUILD_LIBTORRENT 1
+#define MAKE_GeneratedCMakeLists 1
 
 int main()
 {
@@ -458,6 +483,239 @@ int main()
 #endif
 
 	std::cout << "Libtorrent build finish" << "\n\n";
+
+	std::cout << "GeneratedCMakeLists write start" << "\n";
+
+#if MAKE_GeneratedCMakeLists
+	{
+		auto filePath = buildPath + L"/GeneratedCMakeLists.txt";
+		std::wofstream cmakeFile(filePath.c_str(), std::ios::out | std::ios::trunc);
+
+		if (!cmakeFile.is_open()) {
+			std::cerr << "Failed to open cmake file" << std::endl;
+			return 1;
+		}
+
+		std::wstring indent;
+		std::wstring oneIndent = L"    ";
+
+		auto increadeIndent = [&]()
+		{
+			indent += oneIndent;
+		};
+		auto decreaseIndent = [&]()
+		{
+			if (indent.size() < oneIndent.size()) {
+				assert(false);
+				indent.clear();
+				return;
+			}
+
+			indent.resize(indent.size() - oneIndent.size());
+		};
+		auto writeLine = [&](const std::wstring& line)
+		{
+			cmakeFile << indent << line << std::endl;
+		};
+		auto addNewLine = [&]()
+		{
+			cmakeFile << std::endl;
+		};
+
+		struct CmakeVars {
+			std::set<std::wstring> include;
+			std::set<std::wstring> lib;
+		};
+
+		std::map<BuildConfig, CmakeVars> cmakeVars;
+
+		struct CmakeDllVars {
+			std::map<BuildConfig, std::wstring> dll;
+		};
+
+		// base dll name mapped to real dll name based on config(debug/release)
+		std::map<std::wstring, CmakeDllVars> cmakeDllVars;
+
+		writeLine(L"cmake_minimum_required(VERSION 3.10)");
+		addNewLine();
+
+		auto addZlibCmakeVars = [&](const ZLibBuild& build)
+		{
+			auto config = build.GetBuildConfig();
+			std::wstring configPrefix = config == BuildConfig::Debug ? L"_DEBUG" : L"_RELEASE";
+			std::wstring includeVarName = std::wstring() + L"ZLIB_INCLUDE_DIR" + configPrefix;
+			std::wstring libVarName = std::wstring() + L"ZLIB_LIB" + configPrefix;
+
+			std::wstring setInclude = std::wstring() + L"set(" + includeVarName + L" " + ToForwardSlash(build.GetIncludePath()) + L")";
+			std::wstring setLib = std::wstring() + L"set(" + libVarName + L" " + ToForwardSlash(build.GetStaticLibPath()) + L")";
+
+			writeLine(setInclude);
+			writeLine(setLib);
+
+			cmakeVars[config].include.insert(includeVarName);
+			cmakeVars[config].lib.insert(libVarName);
+		};
+
+		auto addOpenSSLCmakeVars = [&](const OpenSSLBuild& build)
+		{
+			auto config = build.GetBuildConfig();
+			std::wstring configPrefix = config == BuildConfig::Debug ? L"_DEBUG" : L"_RELEASE";
+			std::wstring includeVarName = std::wstring() + L"OPENSSL_INCLUDE_DIR" + configPrefix;
+			std::wstring libSslVarName = std::wstring() + L"OPENSSL_SSL_LIB" + configPrefix;
+			std::wstring libCryptoVarName = std::wstring() + L"OPENSSL_CRYPTO_LIB" + configPrefix;
+
+			std::wstring dllSslBaseName = L"OPENSSL_SSL_DLL";
+			std::wstring dllCryptoBaseName = L"OPENSSL_CRYPTO_DLL";
+			std::wstring dllSslVarName = dllSslBaseName + configPrefix;
+			std::wstring dllCryptoVarName = dllCryptoBaseName + configPrefix;
+
+			std::wstring setInclude = std::wstring() + L"set(" + includeVarName + L" " + Quote(ToForwardSlash(build.GetInstalIncludeDir())) + L")";
+
+			std::wstring setSslLib = std::wstring() + L"set(" + libSslVarName + L" " + Quote(ToForwardSlash(build.GetInstalSslEayLib(build.GetBuildConfig()))) + L")";
+			std::wstring setCryptoLib = std::wstring() + L"set(" + libCryptoVarName + L" " + Quote(ToForwardSlash(build.GetInstalLibEayLib(build.GetBuildConfig()))) + L")";
+
+			std::wstring setSslDll = std::wstring() + L"set(" + dllSslVarName + L" " + Quote(ToForwardSlash(build.GetInstalSslEayDll(build.GetBuildConfig()))) + L")";
+			std::wstring setCryptoDll = std::wstring() + L"set(" + dllCryptoVarName + L" " + Quote(ToForwardSlash(build.GetInstalLibEayDll(build.GetBuildConfig()))) + L")";
+
+			writeLine(setInclude);
+			writeLine(setSslLib);
+			writeLine(setCryptoLib);
+			writeLine(setSslDll);
+			writeLine(setCryptoDll);
+
+			cmakeVars[config].include.insert(includeVarName);
+			cmakeVars[config].lib.insert(libSslVarName);
+			cmakeVars[config].lib.insert(libCryptoVarName);
+
+			cmakeDllVars[dllSslBaseName].dll[config] = dllSslVarName;
+			cmakeDllVars[dllCryptoBaseName].dll[config] = dllCryptoVarName;
+		};
+
+		auto addBoostCmakeVars = [&](const BoostBuild& build)
+		{
+			// add libs if needed
+			auto config = build.GetBuildConfig();
+			std::wstring configPrefix = config == BuildConfig::Debug ? L"_DEBUG" : L"_RELEASE";
+			std::wstring includeVarName = std::wstring() + L"BOOST_INCLUDE_DIR" + configPrefix;
+
+			std::wstring setInclude = std::wstring() + L"set(" + includeVarName + L" " + ToForwardSlash(build.GetInstalIncludeDir()) + L")";
+
+			writeLine(setInclude);
+
+			cmakeVars[config].include.insert(includeVarName);
+		};
+
+		auto addLibtorrentCmakeVars = [&](const LibtorrentBuild& build)
+		{
+			auto config = build.GetBuildConfig();
+			std::wstring configPrefix = config == BuildConfig::Debug ? L"_DEBUG" : L"_RELEASE";
+			std::wstring includeVarName = std::wstring() + L"LIBTORRENT_INCLUDE_DIR" + configPrefix;
+			std::wstring libVarName = std::wstring() + L"LIBTORRENT_LIB" + configPrefix;
+
+			std::wstring dllBaseName = L"LIBTORRENT_DLL";
+			std::wstring dllVarName = dllBaseName + configPrefix;
+
+			std::wstring setInclude = std::wstring() + L"set(" + includeVarName + L" " + ToForwardSlash(build.GetIncludePath()) + L")";
+			std::wstring setLib = std::wstring() + L"set(" + libVarName + L" " + ToForwardSlash(build.GetLibPath()) + L")";
+			std::wstring setDll = std::wstring() + L"set(" + dllVarName + L" " + ToForwardSlash(build.GetDllPath()) + L")";
+
+			writeLine(setInclude);
+			writeLine(setLib);
+			writeLine(setDll);
+
+			cmakeVars[config].include.insert(includeVarName);
+			cmakeVars[config].lib.insert(libVarName);
+
+			cmakeDllVars[dllBaseName].dll[config] = dllVarName;
+		};
+
+		auto addCmakeVars = [&](BuildArch cmakeArch)
+		{
+			ForAllArchConfig([&](BuildArch arch, BuildConfig config)
+				{
+					if (arch != cmakeArch) {
+						return;
+					}
+
+					addZlibCmakeVars(LibBuild::FindLibBuild(zlibBuilds, arch, config));
+					addNewLine();
+					addOpenSSLCmakeVars(LibBuild::FindLibBuild(openSslBuilds, arch, config));
+					addNewLine();
+					addBoostCmakeVars(LibBuild::FindLibBuild(boostBuilds, arch, config));
+					addNewLine();
+					addLibtorrentCmakeVars(LibBuild::FindLibBuild(libtorrentBuilds, arch, config));
+					addNewLine();
+					addNewLine();
+				});
+		};
+
+		writeLine(LR"(if(CMAKE_GENERATOR_PLATFORM STREQUAL "x64"))");
+
+		increadeIndent();
+		addCmakeVars(BuildArch::x64);
+		decreaseIndent();
+		
+		writeLine(LR"(else())");
+
+		increadeIndent();
+		addCmakeVars(BuildArch::Win32);
+		decreaseIndent();
+
+		writeLine(LR"(endif())");
+		addNewLine();
+
+		ForAllConfig([&](BuildConfig config)
+			{
+				std::wstring cmakeConfigFilter = config == BuildConfig::Debug ? L"$<$<CONFIG:Debug>:" : L"$<$<CONFIG:Release>:";
+
+				for (const auto& includeVar : cmakeVars[config].include) {
+					writeLine(L"target_include_directories(Client");
+					increadeIndent();
+
+					writeLine(L"PUBLIC");
+					writeLine(cmakeConfigFilter + L"${" + includeVar + L"}>");
+
+					decreaseIndent();
+					writeLine(L")");
+					addNewLine();
+				}
+
+				for (const auto& libVar : cmakeVars[config].lib) {
+					writeLine(L"target_link_libraries(Client");
+					increadeIndent();
+
+					writeLine(L"PUBLIC");
+					writeLine(cmakeConfigFilter + L"${" + libVar + L"}>");
+
+					decreaseIndent();
+					writeLine(L")");
+					addNewLine();
+				}
+			});
+
+		for (const auto& dllPair : cmakeDllVars) {
+			writeLine(L"add_custom_command(TARGET Client POST_BUILD");
+			increadeIndent();
+
+			writeLine(L"COMMAND ${CMAKE_COMMAND} -E copy_if_different");
+
+			const auto& debugDllVar = dllPair.second.dll.at(BuildConfig::Debug);
+			const auto& releaseDllVar = dllPair.second.dll.at(BuildConfig::Release);
+
+			writeLine(L"$<IF:$<CONFIG:Debug>,${" + debugDllVar + L"},$<IF:$<CONFIG:Release>,${" + releaseDllVar + L"},>>");
+
+			writeLine(L"$<TARGET_FILE_DIR:Client>");
+
+			decreaseIndent();
+			writeLine(L")");
+			addNewLine();
+		}
+
+		cmakeFile.close();
+	}
+#endif
+
+	std::cout << "GeneratedCMakeLists write end" << "\n";
 
     /*if(false)
 	{
@@ -621,12 +879,12 @@ std::wstring ZLibBuild::GetStaticLibPath() const {
 		throw std::runtime_error("GetStaticLibPath: unknown config");
 	}
 
-	auto res = this->GetInstallPath() + L"/lib/" + libName;
+	auto res = Quote(this->GetInstallFolder() + L"/lib/" + libName);
 	return res;
 }
 
 std::wstring ZLibBuild::GetIncludePath() const {
-	auto res = this->GetInstallPath() + L"/include";
+	auto res = Quote(this->GetInstallFolder() + L"/include");
 	return res;
 }
 
@@ -688,8 +946,12 @@ std::wstring ZLibBuild::GetBuildPath() const {
 	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildLocalFolder());
 }
 
+std::wstring ZLibBuild::GetInstallFolder() const {
+	return this->GetBuildBasePath() + L"/" + this->GetBuildFolder() + L"/install";
+}
+
 std::wstring ZLibBuild::GetInstallPath() const {
-	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildFolder() + L"/install");
+	return Quote(this->GetInstallFolder());
 }
 
 std::wstring ZLibBuild::GetArchPathStr() const {
@@ -1251,6 +1513,18 @@ void LibtorrentBuild::DoAllSteps() const {
 	this->Clean();
 }
 
+std::wstring LibtorrentBuild::GetIncludePath() const {
+	return Quote(this->GetInstallFolder() + L"/include");
+}
+
+std::wstring LibtorrentBuild::GetLibPath() const {
+	return Quote(this->GetInstallFolder() + L"/lib/torrent-rasterbar.lib");
+}
+
+std::wstring LibtorrentBuild::GetDllPath() const {
+	return Quote(this->GetInstallFolder() + L"/bin/torrent-rasterbar.dll");
+}
+
 void LibtorrentBuild::Generate() const {
 	Process::ProcessTaskParameters procParams;
 
@@ -1348,8 +1622,12 @@ std::wstring LibtorrentBuild::GetBuildPath() const {
 	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildLocalFolder());
 }
 
+std::wstring LibtorrentBuild::GetInstallFolder() const {
+	return this->GetBuildBasePath() + L"/" + this->GetBuildFolder() + L"/install";
+}
+
 std::wstring LibtorrentBuild::GetInstallPath() const {
-	return Quote(this->GetBuildBasePath() + L"/" + this->GetBuildFolder() + L"/install");
+	return Quote(this->GetInstallFolder());
 }
 
 std::wstring LibtorrentBuild::CmakeOpt_ON(const std::wstring& optName) {
