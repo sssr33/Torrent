@@ -289,7 +289,6 @@ private:
 	static constexpr std::wstring_view BoostVer = L"1_84";
 
 	const ZLibBuild& zlibBuild;
-	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs;
 	std::shared_ptr<std::atomic<int>> inProgressBuildsCount;
 
 	static std::once_flag bootstrapOnce;
@@ -359,10 +358,11 @@ int main()
 
 	auto solutionPath = ToWString(SOLUTION_FOLDER);
 	auto buildPath = solutionPath + buildLibFolder;
-	auto zlibSrcPath = solutionPath + L"zlib";
-	auto openSslSrcPath = solutionPath + L"openssl";
-	auto boostSrcPath = solutionPath + L"boost";
-	auto libtorrentSrcPath = solutionPath + L"libtorrent";
+	auto srcFolderBase = solutionPath + L"3rdParty/";
+	auto zlibSrcPath = srcFolderBase + L"zlib";
+	auto openSslSrcPath = srcFolderBase + L"openssl";
+	auto boostSrcPath = srcFolderBase + L"boost";
+	auto libtorrentSrcPath = srcFolderBase + L"libtorrent";
 	auto platformFactory = Platform::CreateWinPlatformFactory();
 
 #if BUILD_CLEAN
