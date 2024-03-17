@@ -339,6 +339,7 @@ void RunTest(std::wstring encoding);
 std::wstring ToWString(std::string_view str);
 std::wstring Quote(const std::wstring& str);
 std::wstring ToForwardSlash(const std::wstring& str);
+std::wstring RemoveCLRF(const std::wstring& str);
 void JoinAll(std::vector<std::thread>& tasks);
 
 #define BUILD_CLEAN 1
@@ -711,6 +712,28 @@ int main()
 			addNewLine();
 		}
 
+		// from lib\cmake\LibtorrentRasterbar\LibtorrentRasterbarTargets.cmake
+		// INTERFACE_COMPILE_DEFINITIONS
+		// Not all used
+		{
+			writeLine(L"target_compile_definitions(Client PRIVATE");
+			increadeIndent();
+
+			writeLine(L"TORRENT_LINKING_SHARED");
+			writeLine(L"$<$<CONFIG:Debug>:TORRENT_USE_ASSERTS>");
+			writeLine(L"BOOST_ASIO_ENABLE_CANCELIO");
+			writeLine(L"BOOST_ASIO_NO_DEPRECATED");
+			writeLine(L"TORRENT_NO_DEPRECATE");
+			writeLine(L"TORRENT_USE_OPENSSL");
+			writeLine(L"TORRENT_USE_LIBCRYPTO");
+			writeLine(L"TORRENT_SSL_PEERS");
+			writeLine(L"OPENSSL_NO_SSL2");
+
+			decreaseIndent();
+			writeLine(L")");
+			addNewLine();
+		}
+
 		cmakeFile.close();
 	}
 #endif
@@ -781,6 +804,16 @@ std::wstring ToForwardSlash(const std::wstring& str) {
 		else {
 			res.push_back(ch);
 		}
+	}
+
+	return res;
+}
+
+std::wstring RemoveCLRF(const std::wstring& str) {
+	std::wstring res = str;
+
+	while (!res.empty() && (res.back() == L'\n' || res.back() == L'\r')) {
+		res.pop_back();
 	}
 
 	return res;
@@ -1539,7 +1572,7 @@ void LibtorrentBuild::Generate() const {
 		+ CmakeOpt_OFF(L"build_examples")
 		+ CmakeOpt_OFF(L"build_tests")
 		+ CmakeOpt_OFF(L"build_tools")
-		+ CmakeOpt_ON(L"deprecated-functions")
+		+ CmakeOpt_OFF(L"deprecated-functions")
 		+ CmakeOpt_OFF(L"developer-options")
 		+ CmakeOpt_ON(L"dht")
 		+ CmakeOpt_ON(L"encryption")
@@ -1574,6 +1607,39 @@ void LibtorrentBuild::Generate() const {
 
 	auto handler = std::make_shared<TestConsoleHandler>();
 	Process::Utf8ConsoleProcess::Run(procParams, handler);
+
+
+	// TODO add such logic for ZLIB
+	// add MP to existing CMAKE_CXX_FLAGS
+	// MP needed to use "jobCount" cores for compilation
+
+	std::wstring cxxFlagsStr = L"CMAKE_CXX_FLAGS:STRING=";
+
+	Process::ProcessTaskParameters procParams2;
+	procParams2.commandLine =
+		std::wstring()
+		+ L"findstr"
+		+ L" " + cxxFlagsStr
+		+ L" " + Quote(this->GetBuildBasePath() + L"/" + this->GetBuildLocalFolder() + L"/CMakeCache.txt");
+		;
+
+	auto handler2 = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams2, handler2);
+
+	auto cxxFlags = RemoveCLRF(handler2->str.substr(cxxFlagsStr.size()));
+	cxxFlags += L" /MP" + std::to_wstring(this->jobCount);
+
+	Process::ProcessTaskParameters procParams3;
+	procParams3.commandLine =
+		std::wstring()
+		+ L"cmake"
+		+ L" -DCMAKE_CXX_FLAGS=" + Quote(cxxFlags)
+		+ L" -S " + Quote(this->GetSrcPath())
+		+ L" -B " + this->GetBuildPath()
+	;
+
+	auto handler3 = std::make_shared<TestConsoleHandler>();
+	Process::Utf8ConsoleProcess::Run(procParams3, handler3);
 }
 
 void LibtorrentBuild::Build() const {
