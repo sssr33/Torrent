@@ -19,3 +19,6 @@
 [submodule "3rdParty/harfbuzz"]
 	path = 3rdParty/harfbuzz
 	url = https://github.com/harfbuzz/harfbuzz.git
+[submodule "3rdParty/libpng"]
+	path = 3rdParty/libpng
+	url = https://github.com/pnggroup/libpng.git
