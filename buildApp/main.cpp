@@ -313,11 +313,13 @@ public:
 	std::wstring GetIncludePath() const;
 	std::wstring GetLibPath() const;
 	std::wstring GetDllPath() const;
+	std::wstring GetPdbPath() const;
 
 private:
 	void Generate() const;
 	void Build() const;
 	void Install() const;
+	void CopyPDB() const;
 	void Clean() const;
 
 	std::wstring GetBuildFolder() const;
@@ -616,18 +618,25 @@ int main()
 			std::wstring dllBaseName = L"LIBTORRENT_DLL";
 			std::wstring dllVarName = dllBaseName + configPrefix;
 
+			std::wstring pdbBaseName = L"LIBTORRENT_PDB";
+			std::wstring pdbVarName = pdbBaseName + configPrefix;
+
 			std::wstring setInclude = std::wstring() + L"set(" + includeVarName + L" " + ToForwardSlash(build.GetIncludePath()) + L")";
 			std::wstring setLib = std::wstring() + L"set(" + libVarName + L" " + ToForwardSlash(build.GetLibPath()) + L")";
 			std::wstring setDll = std::wstring() + L"set(" + dllVarName + L" " + ToForwardSlash(build.GetDllPath()) + L")";
+			std::wstring setPdb = std::wstring() + L"set(" + pdbVarName + L" " + ToForwardSlash(build.GetPdbPath()) + L")";
 
 			writeLine(setInclude);
 			writeLine(setLib);
 			writeLine(setDll);
+			writeLine(setPdb);
 
 			cmakeVars[config].include.insert(includeVarName);
 			cmakeVars[config].lib.insert(libVarName);
 
 			cmakeDllVars[dllBaseName].dll[config] = dllVarName;
+			// use dll vars for pdb to copy pdb to app build folder
+			cmakeDllVars[pdbBaseName].dll[config] = pdbVarName;
 		};
 
 		auto addCmakeVars = [&](BuildArch cmakeArch)
@@ -1543,6 +1552,7 @@ void LibtorrentBuild::DoAllSteps() const {
 	this->Generate();
 	this->Build();
 	this->Install();
+	this->CopyPDB();
 	this->Clean();
 }
 
@@ -1556,6 +1566,10 @@ std::wstring LibtorrentBuild::GetLibPath() const {
 
 std::wstring LibtorrentBuild::GetDllPath() const {
 	return Quote(this->GetInstallFolder() + L"/bin/torrent-rasterbar.dll");
+}
+
+std::wstring LibtorrentBuild::GetPdbPath() const {
+	return Quote(this->GetInstallFolder() + L"/bin/torrent-rasterbar.pdb");
 }
 
 void LibtorrentBuild::Generate() const {
@@ -1670,6 +1684,13 @@ void LibtorrentBuild::Install() const {
 
 	auto handler = std::make_shared<TestConsoleHandler>();
 	Process::Utf8ConsoleProcess::Run(procParams, handler);
+}
+
+void LibtorrentBuild::CopyPDB() const {
+	auto pdbSrcFolder = this->GetBuildLocalFolder() + L"/" + ToDefaultString(this->GetBuildConfig()) + L"/";
+	auto pdbDstFolder = this->GetBuildFolder() + L"/install" + L"/bin" + L"/";
+
+	this->buildFolderFs->CopyFile(pdbDstFolder + L"torrent-rasterbar.pdb", pdbSrcFolder + L"torrent-rasterbar.pdb");
 }
 
 void LibtorrentBuild::Clean() const {
