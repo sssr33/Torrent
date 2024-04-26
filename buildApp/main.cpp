@@ -336,6 +336,28 @@ private:
 	const BoostBuild& boostBuild;
 };
 
+class LibPngBuild : public LibBuild {
+public:
+	LibPngBuild(
+		BuildArch arch,
+		BuildConfig config,
+		std::wstring srcPath,
+		std::wstring buildBasePath,
+		std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
+		const std::vector<ZLibBuild>& zlibBuilds
+	);
+
+	void DoAllSteps() const;
+
+private:
+	void Generate() const;
+	void Build() const;
+	void Install() const;
+	void Clean() const;
+
+	const ZLibBuild& zlibBuild;
+};
+
 void RunTest(std::wstring encoding);
 std::wstring ToWString(std::string_view str);
 std::wstring Quote(const std::wstring& str);
@@ -343,11 +365,12 @@ std::wstring ToForwardSlash(const std::wstring& str);
 std::wstring RemoveCLRF(const std::wstring& str);
 void JoinAll(std::vector<std::thread>& tasks);
 
-#define BUILD_CLEAN 1
-#define BUILD_ZLIB 1
-#define BUILD_OPENSSL 1
-#define BUILD_BOOST 1
-#define BUILD_LIBTORRENT 1
+#define BUILD_CLEAN 0
+#define BUILD_ZLIB 0
+#define BUILD_OPENSSL 0
+#define BUILD_BOOST 0
+#define BUILD_LIBTORRENT 0
+#define BUILD_LIBPNG 1
 #define MAKE_GeneratedCMakeLists 1
 
 int main()
@@ -365,6 +388,7 @@ int main()
 	auto openSslSrcPath = srcFolderBase + L"openssl";
 	auto boostSrcPath = srcFolderBase + L"boost";
 	auto libtorrentSrcPath = srcFolderBase + L"libtorrent";
+	auto libpngSrcPath = srcFolderBase + L"libpng";
 	auto platformFactory = Platform::CreateWinPlatformFactory();
 
 #if BUILD_CLEAN
@@ -486,6 +510,32 @@ int main()
 #endif
 
 	std::cout << "Libtorrent build finish" << "\n\n";
+
+	std::cout << "LibPNG build start" << "\n";
+
+	std::vector<LibPngBuild> libpngBuilds;
+
+	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
+		{
+			if (arch == BuildArch::x64 && config == BuildConfig::Debug) {
+				auto buildFolderFs = platformFactory->CreateFilesystem(buildPath);
+				libpngBuilds.emplace_back(arch, config, libpngSrcPath, buildPath, std::move(buildFolderFs), zlibBuilds);
+			}
+		});
+
+#if BUILD_LIBPNG
+	size_t libpngJobCount = std::thread::hardware_concurrency() / libpngBuilds.size();
+
+	for (auto& build : libpngBuilds) {
+		using LibT = std::remove_reference_t<decltype(build)>;
+		build.InitJobCount(libpngJobCount);
+		tasks.push_back(std::thread(&LibT::DoAllSteps, std::cref(build)));
+	}
+
+	JoinAll(tasks);
+#endif
+
+	std::cout << "LibPNG build end" << "\n";
 
 	std::cout << "GeneratedCMakeLists write start" << "\n";
 
@@ -1727,6 +1777,41 @@ std::wstring LibtorrentBuild::CmakeOpt_OFF(const std::wstring& optName) {
 
 std::wstring LibtorrentBuild::CmakeOpt_Path(const std::wstring& optName, const std::wstring& path) {
 	return std::wstring() + L" " + L"-D" + optName + L"=" + Quote(ToForwardSlash(path));
+}
+
+LibPngBuild::LibPngBuild(
+	BuildArch arch,
+	BuildConfig config,
+	std::wstring srcPath,
+	std::wstring buildBasePath,
+	std::unique_ptr<Filesystem::IFilesystem> buildFolderFs,
+	const std::vector<ZLibBuild>& zlibBuilds
+)
+	: LibBuild(arch, config, std::move(srcPath), std::move(buildBasePath), std::move(buildFolderFs))
+	, zlibBuild(this->FindLibBuild(zlibBuilds))
+{}
+
+void LibPngBuild::DoAllSteps() const {
+	this->Generate();
+	this->Build();
+	this->Install();
+	this->Clean();
+}
+
+void LibPngBuild::Generate() const {
+
+}
+
+void LibPngBuild::Build() const {
+
+}
+
+void LibPngBuild::Install() const {
+
+}
+
+void LibPngBuild::Clean() const {
+
 }
 
 // https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
