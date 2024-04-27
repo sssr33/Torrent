@@ -1,5 +1,6 @@
 #include "Utf8ConsoleProcess.h"
-#include "Helpers/Utf.h"
+
+#include <Helpers/Utf.h>
 
 namespace Process
 {

@@ -1,7 +1,8 @@
 #pragma once
 #include "Pipe.h"
-#include "Helpers/Strong.h"
-#include "Helpers/WinApiEvent.h"
+
+#include <Helpers/Strong.h>
+#include <Helpers/WinApiEvent.h>
 
 #include <vector>
 

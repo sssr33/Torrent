@@ -1,6 +1,6 @@
 #pragma once
-#include "Helpers/WinApiSmartHandle.h"
-#include "Helpers/GetAddressOf.h"
+#include <Helpers/WinApiSmartHandle.h>
+#include <Helpers/GetAddressOf.h>
 
 #include <memory>
 #include <Windows.h>

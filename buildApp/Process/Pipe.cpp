@@ -1,7 +1,8 @@
 #include "Pipe.h"
 #include "MyCreatePipeEx.h"
-#include "Helpers/GetAddressOf.h"
-#include "Helpers/WinApiException.h"
+
+#include <Helpers/GetAddressOf.h>
+#include <Helpers/WinApiException.h>
 
 namespace Process
 {

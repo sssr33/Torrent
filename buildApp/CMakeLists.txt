@@ -34,3 +34,8 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT B
 if(MSVC)
  target_compile_options(BuildApp PRIVATE "/MP")
 endif()
+
+# Add helpers lib
+add_subdirectory(../helpers helpers_build)
+target_link_libraries(BuildApp PRIVATE Helpers)
+target_include_directories(BuildApp PRIVATE ${helpers_SOURCE_DIR})

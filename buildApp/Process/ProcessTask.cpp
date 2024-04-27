@@ -6,9 +6,10 @@
 #include "ProcessJobScope.h"
 #include "ProcessHelpers.h"
 #include "PseudoConsole.h"
-#include "Helpers/WinApiException.h"
-#include "Helpers/WinApiEvent.h"
-#include "Helpers/Scope.h"
+
+#include <Helpers/WinApiException.h>
+#include <Helpers/WinApiEvent.h>
+#include <Helpers/Scope.h>
 
 #include <Windows.h>
 #include <vector>

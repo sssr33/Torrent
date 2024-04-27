@@ -1,10 +1,11 @@
 ﻿#include "BuildAppConfig.h"
-#include "Helpers/Utf.h"
 #include "Process/Utf8ConsoleProcess.h"
 #include "Platform/WinPlatformFactory.h"
 #include "BuildAppConfig.h"
 
 #include "PseudoConsoleTest.h"
+
+#include <Helpers/Utf.h>
 
 #include <memory>
 #include <algorithm>

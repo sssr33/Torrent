@@ -36,3 +36,8 @@ endif()
 
 # GeneratedCMakeLists.txt contain vars with paths to includes, libs, dlls for 3rd party libs
 include(${CMAKE_CURRENT_SOURCE_DIR}/../!!BUILD_LIB/GeneratedCMakeLists.txt)
+
+# Add helpers lib
+add_subdirectory(../helpers helpers_build)
+target_link_libraries(Client PRIVATE Helpers)
+target_include_directories(Client PRIVATE ${helpers_SOURCE_DIR})

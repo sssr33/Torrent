@@ -1,5 +1,6 @@
 #include "ProcessJobScope.h"
-#include "Helpers/WinApiException.h"
+
+#include <Helpers/WinApiException.h>
 
 namespace Process
 {

@@ -1,5 +1,5 @@
 #pragma once
-#include "Helpers/Strong.h"
+#include <Helpers/Strong.h>
 
 #include <cstdint>
 
