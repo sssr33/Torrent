@@ -344,11 +344,11 @@ std::wstring ToForwardSlash(const std::wstring& str);
 std::wstring RemoveCLRF(const std::wstring& str);
 void JoinAll(std::vector<std::thread>& tasks);
 
-#define BUILD_CLEAN 1
-#define BUILD_ZLIB 1
-#define BUILD_OPENSSL 1
-#define BUILD_BOOST 1
-#define BUILD_LIBTORRENT 1
+#define BUILD_CLEAN 0
+#define BUILD_ZLIB 0
+#define BUILD_OPENSSL 0
+#define BUILD_BOOST 0
+#define BUILD_LIBTORRENT 0
 #define MAKE_GeneratedCMakeLists 1
 
 int main()
@@ -630,14 +630,18 @@ int main()
 			writeLine(setInclude);
 			writeLine(setLib);
 			writeLine(setDll);
-			writeLine(setPdb);
+			if (config == BuildConfig::Debug) {
+				writeLine(setPdb);
+			}
 
 			cmakeVars[config].include.insert(includeVarName);
 			cmakeVars[config].lib.insert(libVarName);
 
 			cmakeDllVars[dllBaseName].dll[config] = dllVarName;
-			// use dll vars for pdb to copy pdb to app build folder
-			cmakeDllVars[pdbBaseName].dll[config] = pdbVarName;
+			if (config == BuildConfig::Debug) {
+				// use dll vars for pdb to copy pdb to app build folder
+				cmakeDllVars[pdbBaseName].dll[config] = pdbVarName;
+			}
 		};
 
 		auto addCmakeVars = [&](BuildArch cmakeArch)
@@ -705,17 +709,28 @@ int main()
 			});
 
 		for (const auto& dllPair : cmakeDllVars) {
+			auto getCopyCommand = [&](BuildConfig config)
+			{
+				if (dllPair.second.dll.contains(config)) {
+					const auto& dllVar = dllPair.second.dll.at(config);
+					return std::wstring() + L"${CMAKE_COMMAND} -E copy_if_different ${" + dllVar + L"} $<TARGET_FILE_DIR:Client>";
+				}
+
+				return std::wstring() + L"${CMAKE_COMMAND} -E echo \"Skipping " + dllPair.first + L" copy for " + ToDefaultString(config) + L" configuration.\" ";
+			};
+
+			auto debugCmdName = dllPair.first + L"_CMD_" + ToDefaultString(BuildConfig::Debug);
+			auto releaseCmdName = dllPair.first + L"_CMD_" + ToDefaultString(BuildConfig::Release);
+
+			writeLine(std::wstring() + L"set(" + debugCmdName + L" " + getCopyCommand(BuildConfig::Debug) + L")");
+			writeLine(std::wstring() + L"set(" + releaseCmdName + L" " + getCopyCommand(BuildConfig::Release) + L")");
+
 			writeLine(L"add_custom_command(TARGET Client POST_BUILD");
 			increadeIndent();
 
-			writeLine(L"COMMAND ${CMAKE_COMMAND} -E copy_if_different");
-
-			const auto& debugDllVar = dllPair.second.dll.at(BuildConfig::Debug);
-			const auto& releaseDllVar = dllPair.second.dll.at(BuildConfig::Release);
-
-			writeLine(L"$<IF:$<CONFIG:Debug>,${" + debugDllVar + L"},$<IF:$<CONFIG:Release>,${" + releaseDllVar + L"},>>");
-
-			writeLine(L"$<TARGET_FILE_DIR:Client>");
+			writeLine(std::wstring() + L"COMMAND \"$<IF:$<CONFIG:Debug>,${" + debugCmdName + L"},${" + releaseCmdName + L"}>\"");
+			writeLine(L"COMMAND_EXPAND_LISTS"); // https://cmake.org/cmake/help/latest/manual/cmake-generator-expressions.7.html#whitespace-and-quoting
+			writeLine(L"VERBATIM"); // https://cmake.org/cmake/help/latest/manual/cmake-generator-expressions.7.html#whitespace-and-quoting
 
 			decreaseIndent();
 			writeLine(L")");
