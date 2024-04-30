@@ -14,6 +14,8 @@
 #include <semaphore>
 #include <libtorrent/libtorrent.hpp>
 
+#include "UI/Dx11Window.h"
+
 #pragma comment(lib, "Iphlpapi.lib")
 
 /*
@@ -25,6 +27,16 @@ NEED TO COPY PDB for all libs
 */
 
 int main() {
+	{
+		Dx11Window wnd(L"TorrentWndClass", L"Torrent");
+
+		WindowsThreadMessageQueue wndMsgQueue;
+
+		while (true) {
+			wndMsgQueue.WaitAndProcessQueuedMessages();
+		}
+	}
+
 	{
 		ULONG buf_size = 10000;
 		std::vector<char> buffer(buf_size);
