@@ -72,7 +72,7 @@ void Dx11HwndSwapChain::Resize(
     d3dContext->OMSetRenderTargets(ARRAYSIZE(nullViews), nullViews, nullptr);
     d2dContext->SetTarget(nullptr);
 
-    // prevents memory leak
+    // prevents memory leak in ResizeBuffers
     d3dContext->Flush();
 
     hr = this->swapChain->ResizeBuffers(
