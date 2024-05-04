@@ -8,6 +8,7 @@
 #include <d2d1effects_2.h>
 #include <dwrite_3.h>
 #include <wincodec.h>
+#include <dcomp.h>
 #include <DirectXColors.h>
 #include <DirectXMath.h>
 
@@ -16,3 +17,4 @@
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "dwrite.lib")
+#pragma comment(lib, "Dcomp.lib")

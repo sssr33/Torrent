@@ -9,11 +9,16 @@ public:
         const Microsoft::WRL::ComPtr<ID2D1DeviceContext>& d2dContext,
         DXGI_FORMAT format = DXGI_FORMAT_B8G8R8A8_UNORM);
 
+    const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& GetD3DRenderTargetView() const;
+    const Microsoft::WRL::ComPtr<ID2D1Bitmap1>& GetD2DRenderTargetBitmap() const;
+
     void Resize(
         const DirectX::XMUINT2& size,
         const Microsoft::WRL::ComPtr<ID3D11Device>& d3dDevice,
         const Microsoft::WRL::ComPtr<ID3D11DeviceContext>& d3dContext,
         const Microsoft::WRL::ComPtr<ID2D1DeviceContext>& d2dContext);
+
+    void Present(const Microsoft::WRL::ComPtr<ID3D11DeviceContext>& d3dContext);
 
 private:
     static constexpr auto MinSize = DirectX::XMUINT2(1, 1);
@@ -32,4 +37,8 @@ private:
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> d2dTargetBitmap;
     D3D11_VIEWPORT screenViewport = {};
     DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+
+    Microsoft::WRL::ComPtr<IDCompositionDevice> dcomp;
+    Microsoft::WRL::ComPtr<IDCompositionTarget> target;
+    Microsoft::WRL::ComPtr<IDCompositionVisual> visual;
 };

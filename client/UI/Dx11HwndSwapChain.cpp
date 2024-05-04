@@ -22,10 +22,10 @@ Dx11HwndSwapChain::Dx11HwndSwapChain(
     swapChainDesc.SampleDesc.Quality = 0;
     swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.BufferCount = Dx11HwndSwapChain::BufferCount;
-    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;// DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL; // All Microsoft Store apps must use _FLIP_ SwapEffects.
+    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL; // All Microsoft Store apps must use _FLIP_ SwapEffects.
     swapChainDesc.Flags = 0;
     swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
-    swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
 
     HRESULT hr = S_OK;
     Microsoft::WRL::ComPtr<IDXGIDevice3> dxgiDevice;
@@ -41,7 +41,8 @@ Dx11HwndSwapChain::Dx11HwndSwapChain(
     Helpers::ThrowIfFailed(hr);
 
     Microsoft::WRL::ComPtr<IDXGISwapChain1> dxgiSwapChain;
-    hr = dxgiFactory->CreateSwapChainForHwnd(d3dDevice.Get(), hwnd, &swapChainDesc, nullptr, nullptr, &dxgiSwapChain);
+    // CreateSwapChainForComposition works with DXGI_ALPHA_MODE_PREMULTIPLIED and needs DCompositionCreateDevice
+    hr = dxgiFactory->CreateSwapChainForComposition(d3dDevice.Get(), &swapChainDesc, nullptr, &dxgiSwapChain);
     Helpers::ThrowIfFailed(hr);
 
     hr = dxgiSwapChain.As(&this->swapChain);
@@ -53,6 +54,33 @@ Dx11HwndSwapChain::Dx11HwndSwapChain(
     Helpers::ThrowIfFailed(hr);
 
     this->CreateRenderTargets(d3dDevice, d2dContext);
+
+    // Bind our swap chain to the window.
+    hr = DCompositionCreateDevice(dxgiDevice.Get(), IID_PPV_ARGS(&dcomp));
+    Helpers::ThrowIfFailed(hr);
+
+    hr = dcomp->CreateTargetForHwnd(hwnd, FALSE, &target);
+    Helpers::ThrowIfFailed(hr);
+
+    hr = dcomp->CreateVisual(&visual);
+    Helpers::ThrowIfFailed(hr);
+
+    hr = target->SetRoot(visual.Get());
+    Helpers::ThrowIfFailed(hr);
+
+    hr = visual->SetContent(this->swapChain.Get());
+    Helpers::ThrowIfFailed(hr);
+
+    hr = dcomp->Commit();
+    Helpers::ThrowIfFailed(hr);
+}
+
+const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& Dx11HwndSwapChain::GetD3DRenderTargetView() const {
+    return this->d3dRenderTargetView;
+}
+
+const Microsoft::WRL::ComPtr<ID2D1Bitmap1>& Dx11HwndSwapChain::GetD2DRenderTargetBitmap() const {
+    return this->d2dTargetBitmap;
 }
 
 void Dx11HwndSwapChain::Resize(
@@ -85,6 +113,30 @@ void Dx11HwndSwapChain::Resize(
     Helpers::ThrowIfFailed(hr);
 
     this->CreateRenderTargets(d3dDevice, d2dContext);
+}
+
+void Dx11HwndSwapChain::Present(const Microsoft::WRL::ComPtr<ID3D11DeviceContext>& d3dContext) {
+    HRESULT hr = S_OK;
+    // The first argument instructs DXGI to block until VSync, putting the application
+    // to sleep until the next VSync. This ensures we don't waste any cycles rendering
+    // frames that will never be displayed to the screen.
+    DXGI_PRESENT_PARAMETERS parameters = { 0 };
+
+    hr = this->swapChain->Present1(1, 0, &parameters);
+    Helpers::ThrowIfFailed(hr);
+
+    /*hr = this->swapChain->Present(0, DXGI_PRESENT_RESTART);
+    Helpers::ThrowIfFailed(hr);
+
+    hr = this->swapChain->Present(1, DXGI_PRESENT_DO_NOT_SEQUENCE);
+    Helpers::ThrowIfFailed(hr);*/
+
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext1> d3dContext1;
+
+    hr = d3dContext.As(&d3dContext1);
+    Helpers::ThrowIfFailed(hr);
+
+    d3dContext1->DiscardView(this->d3dRenderTargetView.Get());
 }
 
 void Dx11HwndSwapChain::CreateRenderTargets(
