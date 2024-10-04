@@ -469,13 +469,13 @@ int main()
 
 	std::vector<LibtorrentBuild> libtorrentBuilds;
 
+#if BUILD_LIBTORRENT
 	ForAllArchConfig([&](BuildArch arch, BuildConfig config)
 		{
 			auto buildFolderFs = platformFactory->CreateFilesystem(buildPath);
 			libtorrentBuilds.emplace_back(arch, config, libtorrentSrcPath, buildPath, std::move(buildFolderFs), openSslBuilds, boostBuilds);
 		});
 
-#if BUILD_LIBTORRENT
 	size_t libtorrentJobCount = std::thread::hardware_concurrency() / libtorrentBuilds.size();
 
 	for (auto& build : libtorrentBuilds) {
@@ -1344,7 +1344,8 @@ void BoostBuild::Build() const {
 		+ L" " + this->GetBoostBuildConfigName()
 		+ L" address-model=" + this->GetBoostAddressModelNumber()
 		+ L" threading=multi"
-		+ L" --toolset=msvc"
+		+ L" --toolset=msvc-14.2"
+		+ L" cxxflags=-std:c++20"
 		+ L" -j " + std::to_wstring(this->jobCount)
 		+ L" link=static"
 		+ L" runtime-link=shared"
@@ -1379,7 +1380,8 @@ void BoostBuild::Install() const {
 		+ L" " + this->GetBoostBuildConfigName()
 		+ L" address-model=" + this->GetBoostAddressModelNumber()
 		+ L" threading=multi"
-		+ L" --toolset=msvc"
+		+ L" --toolset=msvc-14.2"
+		+ L" cxxflags=-std:c++20"
 		+ L" -j " + std::to_wstring(this->jobCount)
 		+ L" link=static"
 		+ L" runtime-link=shared"
@@ -1415,7 +1417,8 @@ void BoostBuild::Clean() const {
 		+ L" " + this->GetBoostBuildConfigName()
 		+ L" address-model=" + this->GetBoostAddressModelNumber()
 		+ L" threading=multi"
-		+ L" --toolset=msvc"
+		+ L" --toolset=msvc-14.2"
+		+ L" cxxflags=-std:c++20"
 		+ L" -j " + std::to_wstring(this->jobCount)
 		+ L" link=static"
 		+ L" runtime-link=shared"
