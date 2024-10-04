@@ -1,4 +1,8 @@
-#include "Dx11Window.h"
+﻿#include "Dx11Window.h"
+#include "Widgets/RootWidget.h"
+#include "Widgets/GridWidget.h"
+#include "Widgets/RectangleWidget.h"
+#include "Widgets/TextWidget.h"
 
 #include <cassert>
 
@@ -24,13 +28,128 @@ LRESULT Dx11Window::WndProc(UINT uMsg, WPARAM wParam, LPARAM lParam) {
         d2dCtx->BeginDraw();
         d2dCtx->SetTarget(d2dTarget.Get());
 
-        d2dCtx->Clear(D2D1::ColorF(D2D1::ColorF::BlueViolet, 0.3f));
+        auto rootWidget = std::make_shared<RootWidget>();
+        auto rectangleWidget = std::make_shared<RectangleWidget>();
+
+        auto sz = d2dTarget->GetSize();
+
+        rootWidget->SetSize(DirectX::XMFLOAT2(sz.width, sz.height));
+
+        rootWidget->AddChild(rectangleWidget);
+
+        rectangleWidget->SetBackgroundColor(D2D1::ColorF(D2D1::ColorF::BlueViolet, 0.3f));
+        rectangleWidget->SetVerticalAlignment(WidgetVerticalAlignment::Stretch);
+        rectangleWidget->SetHorizontalAlignment(WidgetHorizontalAlignment::Stretch);
+
+        {
+            auto gridWidget = std::make_shared<GridWidget>();
+
+            gridWidget->SetVerticalAlignment(WidgetVerticalAlignment::Stretch);
+            gridWidget->SetHorizontalAlignment(WidgetHorizontalAlignment::Stretch);
+
+            {
+                std::vector<GridWidget::RowDefinition> rows;
+                {
+                    GridWidget::RowDefinition row;
+
+                    row.height = 1.f;
+                    row.sizeType = GridWidget::SizeType::Weighted;
+
+                    rows.push_back(row);
+                }
+
+                gridWidget->SetRows(std::move(rows));
+            }
+
+            {
+                std::vector<GridWidget::ColumnDefinition> columns;
+                {
+                    GridWidget::ColumnDefinition col;
+
+                    col.width = 10.f;
+                    col.sizeType = GridWidget::SizeType::Pixel;
+
+                    columns.push_back(col);
+                }
+                {
+                    GridWidget::ColumnDefinition col;
+
+                    col.width = 2.f;
+                    col.sizeType = GridWidget::SizeType::Weighted;
+
+                    columns.push_back(col);
+                }
+                {
+                    GridWidget::ColumnDefinition col;
+
+                    /*col.width = 2.f;
+                    col.sizeType = GridWidget::SizeType::Weighted;*/
+
+                    col.width = 10.f;
+                    col.sizeType = GridWidget::SizeType::Pixel;
+
+                    columns.push_back(col);
+                }
+
+                gridWidget->SetColumns(std::move(columns));
+            }
+
+            {
+                auto rectangleCellWidget = std::make_shared<RectangleWidget>();
+
+                rectangleCellWidget->SetBackgroundColor(D2D1::ColorF(D2D1::ColorF::Red, 0.3f));
+                rectangleCellWidget->SetVerticalAlignment(WidgetVerticalAlignment::Stretch);
+                rectangleCellWidget->SetHorizontalAlignment(WidgetHorizontalAlignment::Stretch);
+
+                GridWidget::SetWidgetGridRowIdx(*rectangleCellWidget, 0);
+                GridWidget::SetWidgetGridColumnIdx(*rectangleCellWidget, 0);
+
+                gridWidget->AddChild(rectangleCellWidget);
+            }
+            {
+                auto textCellWidget = std::make_shared<TextWidget>();
+
+                textCellWidget->SetFontSize(54.f);
+                textCellWidget->SetText(L"This is text widget 😱");
+                textCellWidget->SetTextColor(D2D1::ColorF(D2D1::ColorF::Yellow, 0.3f));
+                textCellWidget->SetVerticalAlignment(WidgetVerticalAlignment::Stretch);
+                textCellWidget->SetHorizontalAlignment(WidgetHorizontalAlignment::Stretch);
+
+                GridWidget::SetWidgetGridRowIdx(*textCellWidget, 0);
+                GridWidget::SetWidgetGridColumnIdx(*textCellWidget, 1);
+
+                gridWidget->AddChild(textCellWidget);
+            }
+            {
+                auto rectangleCellWidget = std::make_shared<RectangleWidget>();
+
+                rectangleCellWidget->SetBackgroundColor(D2D1::ColorF(D2D1::ColorF::Green, 0.3f));
+                rectangleCellWidget->SetVerticalAlignment(WidgetVerticalAlignment::Stretch);
+                rectangleCellWidget->SetHorizontalAlignment(WidgetHorizontalAlignment::Stretch);
+
+                GridWidget::SetWidgetGridRowIdx(*rectangleCellWidget, 0);
+                GridWidget::SetWidgetGridColumnIdx(*rectangleCellWidget, 2);
+
+                gridWidget->AddChild(rectangleCellWidget);
+            }
+
+            rootWidget->AddChild(gridWidget);
+        }
+
+        WidgetRenderContext ctx = { this->dxDev };
+
+        d2dCtx->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
+
+        rootWidget->Draw(ctx);
+
+
+        /*d2dCtx->Clear(D2D1::ColorF(D2D1::ColorF::BlueViolet, 0.3f));
 
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush;
 
         auto greenBrush = d2dCtx->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::LightSeaGreen, 0.5f), &brush);
 
-        d2dCtx->DrawLine(D2D1::Point2F(100.f, 100.f), D2D1::Point2F(400.f, 200.f), brush.Get(), 10.f);
+        d2dCtx->DrawLine(D2D1::Point2F(100.f, 100.f), D2D1::Point2F(400.f, 200.f), brush.Get(), 10.f);*/
 
         d2dCtx->EndDraw();
 
